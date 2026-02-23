@@ -39,6 +39,9 @@ jobs:
         run: npm ci
         working-directory: backend
 
+      - name: Run quality gates (lint, typecheck, build)
+        run: npm run quality:ci
+
       - name: Run unified CI tests
         run: npm run test:ci
 
@@ -72,6 +75,9 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
         working-directory: backend
+
+      - name: Run quality gates (lint, typecheck, build)
+        run: npm run quality:ci
 
       - name: Start Firestore emulator
         run: |

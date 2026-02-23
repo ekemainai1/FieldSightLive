@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import Home from './page'
 
@@ -21,7 +22,7 @@ jest.mock('@/components/HistoryPanel', () => ({
 }))
 
 jest.mock('@/components/VideoPlayer', () => ({
-  VideoPlayer: require('react').forwardRef(() => <div data-testid="video-player">video</div>),
+  VideoPlayer: React.forwardRef(() => <div data-testid="video-player">video</div>),
 }))
 
 jest.mock('@/components/Transcript', () => ({
@@ -71,7 +72,6 @@ jest.mock('@/hooks/useAudioCapture', () => ({
 }))
 
 jest.mock('@/hooks/useInspectionSession', () => {
-  const React = require('react') as typeof import('react')
   return {
     useInspectionSession: () => {
       const [latestReport, setLatestReport] = React.useState<null | {
