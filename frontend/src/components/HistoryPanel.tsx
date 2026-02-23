@@ -9,6 +9,7 @@ interface InspectionItem {
   technicianId?: string
   siteId?: string
   timestamp?: string
+  workflowEvents?: Array<{ id: string }>
 }
 
 interface HistoryPanelProps {
@@ -66,6 +67,7 @@ export function HistoryPanel({ technicianId, siteId, onOpenReport }: HistoryPane
                 <th className="text-left px-2 py-2">Inspection</th>
                 <th className="text-left px-2 py-2">Status</th>
                 <th className="text-left px-2 py-2">Time</th>
+                <th className="text-left px-2 py-2">Workflow</th>
                 <th className="text-left px-2 py-2">Action</th>
               </tr>
             </thead>
@@ -77,6 +79,7 @@ export function HistoryPanel({ technicianId, siteId, onOpenReport }: HistoryPane
                   <td className="px-2 py-2">
                     {item.timestamp ? new Date(item.timestamp).toLocaleString() : '-'}
                   </td>
+                  <td className="px-2 py-2">{item.workflowEvents?.length ?? 0}</td>
                   <td className="px-2 py-2">
                     <button
                       onClick={() => onOpenReport(item.id)}

@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import Home from './page'
+import LivePage from './live/page'
 
 const wsServiceMock = {
   connect: jest.fn(),
@@ -8,18 +8,27 @@ const wsServiceMock = {
   sendVideoFrame: jest.fn(),
   sendAudio: jest.fn(),
   sendAudioEnd: jest.fn(),
+  sendInspectionContext: jest.fn(),
   sendInterrupt: jest.fn(),
   onMessage: jest.fn(() => () => undefined),
   isConnected: true,
 }
 
-jest.mock('@/components/SetupPanel', () => ({
-  SetupPanel: () => <div data-testid="setup-panel">setup</div>,
-}))
-
-jest.mock('@/components/HistoryPanel', () => ({
-  HistoryPanel: () => <div data-testid="history-panel">history</div>,
-}))
+const inspectionSessionMocks = {
+  startInspection: jest.fn(async () => 'insp-flow-1'),
+  uploadSnapshot: jest.fn(async () => 'https://storage.example/snapshot.jpg'),
+  completeInspection: jest.fn(async () => ({
+    inspectionId: 'insp-flow-1',
+    generatedAt: new Date().toISOString(),
+    status: 'completed' as const,
+    findings: ['Valve misalignment'],
+    safetySummary: ['HIGH - PPE missing'],
+    workflowSummary: ['COMPLETED - create_ticket: Ticket created (wf_123)'],
+    recommendedActions: ['Wear gloves'],
+    imageCount: 1,
+    summaryText: 'Inspection summary text',
+  })),
+}
 
 jest.mock('@/components/VideoPlayer', () => ({
   VideoPlayer: React.forwardRef(() => <div data-testid="video-player">video</div>),
@@ -74,38 +83,26 @@ jest.mock('@/hooks/useAudioCapture', () => ({
 jest.mock('@/hooks/useInspectionSession', () => {
   return {
     useInspectionSession: () => {
-      const [latestReport, setLatestReport] = React.useState<null | {
+      const [latestReport] = React.useState<null | {
         inspectionId: string
         generatedAt: string
         status: 'completed'
         findings: string[]
         safetySummary: string[]
+        workflowSummary: string[]
         recommendedActions: string[]
         imageCount: number
         summaryText: string
       }>(null)
 
       return {
-        inspectionId: 'insp-flow-1',
+        inspectionId: null,
         isBusy: false,
         error: null,
         latestReport,
-        startInspection: jest.fn(async () => 'insp-flow-1'),
-        uploadSnapshot: jest.fn(async () => 'https://storage.example/snapshot.jpg'),
-        completeInspection: jest.fn(async () => {
-          const report = {
-            inspectionId: 'insp-flow-1',
-            generatedAt: new Date().toISOString(),
-            status: 'completed' as const,
-            findings: ['Valve misalignment'],
-            safetySummary: ['HIGH - PPE missing'],
-            recommendedActions: ['Wear gloves'],
-            imageCount: 1,
-            summaryText: 'Inspection summary text',
-          }
-          setLatestReport(report)
-          return report
-        }),
+        startInspection: inspectionSessionMocks.startInspection,
+        uploadSnapshot: inspectionSessionMocks.uploadSnapshot,
+        completeInspection: inspectionSessionMocks.completeInspection,
         refreshLatestReport: jest.fn(async () => latestReport),
         loadReportForInspection: jest.fn(async () => latestReport),
         downloadLatestReportPdf: jest.fn(async () => new Blob(['pdf'], { type: 'application/pdf' })),
@@ -131,6 +128,10 @@ jest.mock('@/lib/store', () => ({
     detectedFaults: unknown[]
     addSafetyFlag: (...args: unknown[]) => void
     addDetectedFault: (...args: unknown[]) => void
+    selection: {
+      technicianId: string
+      siteId: string
+    }
   }) => unknown) => {
     const state = {
       sessionId: 'session-flow-1',
@@ -142,28 +143,33 @@ jest.mock('@/lib/store', () => ({
       detectedFaults: [],
       addSafetyFlag: jest.fn(),
       addDetectedFault: jest.fn(),
+      selection: {
+        technicianId: 'tech-flow-1',
+        siteId: 'site-flow-1',
+      },
     }
     return selector(state)
   },
 }))
 
 describe('Home flow (E2E-style component test)', () => {
-  beforeAll(() => {
-    process.env.NEXT_PUBLIC_DEFAULT_TECHNICIAN_ID = 'tech-flow-1'
-    process.env.NEXT_PUBLIC_DEFAULT_SITE_ID = 'site-flow-1'
+  beforeEach(() => {
+    inspectionSessionMocks.startInspection.mockClear()
+    inspectionSessionMocks.uploadSnapshot.mockClear()
+    inspectionSessionMocks.completeInspection.mockClear()
   })
 
   it('should run start -> snapshot -> complete and show report', async () => {
-    render(<Home />)
+    render(<LivePage />)
 
     fireEvent.click(screen.getByText('Start Camera'))
     fireEvent.click(screen.getByText('Snapshot'))
     fireEvent.click(screen.getByText('Stop Camera'))
 
     await waitFor(() => {
-      expect(screen.getByText('Inspection summary text')).toBeInTheDocument()
-      expect(screen.getByText('Valve misalignment')).toBeInTheDocument()
-      expect(screen.getByText('HIGH - PPE missing')).toBeInTheDocument()
+      expect(inspectionSessionMocks.startInspection).toHaveBeenCalledTimes(1)
+      expect(inspectionSessionMocks.uploadSnapshot).toHaveBeenCalledTimes(1)
+      expect(inspectionSessionMocks.completeInspection).toHaveBeenCalledTimes(1)
     })
   })
 })

@@ -90,4 +90,30 @@ describe('inspectionService (API-level with fetch mocking)', () => {
       'http://localhost:8080/api/v1/inspections/insp-77/report.pdf',
     )
   })
+
+  it('should trigger workflow action via API', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: 'wf-1',
+        action: 'create_ticket',
+        status: 'completed',
+        resultMessage: 'Ticket created.',
+        createdAt: new Date().toISOString(),
+      }),
+    })
+
+    const result = await inspectionService.runWorkflowAction(
+      'insp-42',
+      'create_ticket',
+      'High pressure alert',
+    )
+
+    expect(result.action).toBe('create_ticket')
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8080/api/v1/inspections/insp-42/workflow-actions',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
 })

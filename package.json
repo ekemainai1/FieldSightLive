@@ -2,6 +2,9 @@
   "name": "fieldsight-live",
   "private": true,
   "scripts": {
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "build:all": "npm --prefix frontend run build && npm --prefix backend run build",
     "quality:frontend": "npm --prefix frontend run lint && npm --prefix frontend run typecheck && npm --prefix frontend run build",
     "quality:backend": "npm --prefix backend run lint && npm --prefix backend run build",
     "quality:ci": "npm run quality:frontend && npm run quality:backend",

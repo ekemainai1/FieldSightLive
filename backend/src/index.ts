@@ -7,11 +7,15 @@ import { createServer } from 'http'
 import { v4 as uuidv4 } from 'uuid'
 import winston from 'winston'
 import { GeminiLiveService, type LiveResponseEvent } from './services/gemini-live.service'
+import { AuthService } from './services/auth.service'
+import { EquipmentOcrService } from './services/equipment-ocr.service'
 import { FirestoreDataService } from './services/firestore-data.service'
 import { ReportPdfService } from './services/report-pdf.service'
 import { StorageService } from './services/storage.service'
+import { WorkflowAutomationService } from './services/workflow-automation.service'
 import { createDataRouter } from './routes/data.routes'
 import { incomingMessageSchema, type IncomingMessage } from './utils/ws-validation'
+import { detectWorkflowIntent } from './utils/workflow-intents'
 import { SlidingWindowRateLimiter } from './utils/rate-limiter'
 import type {
   AudioMessage,
@@ -42,12 +46,17 @@ class App {
   public server: ReturnType<typeof createServer>
   public wss: WebSocketServer
   private clients: Map<string, WebSocketClient> = new Map()
+  private inspectionContextByClient: Map<string, string> = new Map()
+  private lastVoiceIntentByClient: Map<string, { action: string; at: number }> = new Map()
   private liveSessionEnabled: Map<string, boolean> = new Map()
   private audioChunkBuffers: Map<string, { chunks: string[]; mimeType: string; sampleRate: number }> = new Map()
   private geminiLiveService = new GeminiLiveService()
+  private authService = new AuthService()
+  private ocrService = new EquipmentOcrService()
   private firestoreService = new FirestoreDataService()
   private reportPdfService = new ReportPdfService()
   private storageService = new StorageService()
+  private workflowAutomationService = new WorkflowAutomationService()
   private rateLimiter: SlidingWindowRateLimiter
 
   private readonly RATE_WINDOW_MS = 10_000
@@ -69,6 +78,7 @@ class App {
   public start(port: number = 8080): void {
     this.server.listen(port, () => {
       logger.info(`Server running on port ${port}`)
+      logger.info(`Auth required: ${this.authService.isAuthRequired()}`)
       logger.info(`WebSocket available at ws://localhost:${port}/ws`)
       logger.info(`WebSocket also accepts ws://localhost:${port}`)
     })
@@ -147,9 +157,16 @@ class App {
       })
     })
 
+    this.app.use('/api/v1', this.httpAuthMiddleware.bind(this))
     this.app.use(
       '/api/v1',
-      createDataRouter(this.firestoreService, this.storageService, this.reportPdfService),
+      createDataRouter(
+        this.firestoreService,
+        this.storageService,
+        this.reportPdfService,
+        this.ocrService,
+        this.workflowAutomationService,
+      ),
     )
 
     this.app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -159,7 +176,19 @@ class App {
   }
 
   private websocket(): void {
-    this.wss.on('connection', (ws: WebSocket) => {
+    this.wss.on('connection', async (ws: WebSocket, request) => {
+      const tokenFromQuery = this.extractTokenFromRequestUrl(request.url)
+      try {
+        const authUser = await this.authService.authenticateToken(tokenFromQuery)
+        if (this.authService.isAuthRequired() && !authUser) {
+          ws.close(4401, 'Unauthorized')
+          return
+        }
+      } catch {
+        ws.close(4401, 'Unauthorized')
+        return
+      }
+
       const clientId = uuidv4()
       const client: WebSocketClient = { id: clientId, ws }
       this.clients.set(clientId, client)
@@ -188,6 +217,8 @@ class App {
         this.geminiLiveService.closeLiveSession(clientId)
         this.liveSessionEnabled.delete(clientId)
         this.audioChunkBuffers.delete(clientId)
+        this.inspectionContextByClient.delete(clientId)
+        this.lastVoiceIntentByClient.delete(clientId)
         this.rateLimiter.clear(clientId)
         this.clients.delete(clientId)
         logger.info(`WebSocket client disconnected: ${clientId}`)
@@ -251,10 +282,38 @@ class App {
           logger.info(`Client ${clientId} interrupted session`)
           void this.processInterrupt(client)
           break
+
+        case 'inspection_context':
+          this.inspectionContextByClient.set(clientId, message.inspectionId)
+          this.sendToClient(clientId, {
+            type: 'gemini_response',
+            text: `Inspection context set to ${message.inspectionId}`,
+          })
+          break
       }
     } catch (error) {
       logger.error(`Error handling message from ${clientId}:`, error)
     }
+  }
+
+  private async httpAuthMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const authHeader = req.headers.authorization
+      const authUser = await this.authService.authenticateBearerHeader(authHeader)
+      req.authUser = authUser
+      next()
+    } catch {
+      res.status(401).json({ error: 'Unauthorized' })
+    }
+  }
+
+  private extractTokenFromRequestUrl(rawUrl?: string): string | undefined {
+    if (!rawUrl) {
+      return undefined
+    }
+    const parsed = new URL(rawUrl, 'http://localhost')
+    const token = parsed.searchParams.get('token')
+    return token || undefined
   }
 
   private allowMessage(clientId: string): boolean {
@@ -386,6 +445,81 @@ class App {
 
     if (event.type === 'error') {
       logger.warn(`Live session event error for ${clientId}: ${event.message}`)
+      return
+    }
+
+    if (event.type === 'transcript' && event.text) {
+      this.sendToClient(clientId, {
+        type: 'live_transcript',
+        speaker: 'user',
+        text: event.text,
+      })
+      void this.triggerWorkflowFromTranscript(clientId, event.text)
+    }
+  }
+
+  private async triggerWorkflowFromTranscript(clientId: string, transcript: string): Promise<void> {
+    try {
+      const action = detectWorkflowIntent(transcript)
+      if (!action) {
+        return
+      }
+
+      const inspectionId = this.inspectionContextByClient.get(clientId)
+      if (!inspectionId) {
+        this.sendToClient(clientId, {
+          type: 'gemini_response',
+          text: 'Workflow intent heard, but no active inspection context is set.',
+        })
+        return
+      }
+
+      const previous = this.lastVoiceIntentByClient.get(clientId)
+      const now = Date.now()
+      if (previous && previous.action === action && now - previous.at < 15_000) {
+        return
+      }
+      this.lastVoiceIntentByClient.set(clientId, { action, at: now })
+
+      const inspection = await this.firestoreService.getInspectionById(inspectionId)
+      if (!inspection) {
+        this.sendToClient(clientId, {
+          type: 'gemini_response',
+          text: `Workflow intent skipped because inspection ${inspectionId} was not found.`,
+        })
+        return
+      }
+
+      const result = await this.workflowAutomationService.runAction({
+        inspectionId,
+        action,
+        note: transcript,
+        metadata: {
+          source: 'voice_intent',
+        },
+      })
+
+      await this.firestoreService.appendInspectionWorkflowEvent(inspectionId, {
+        action,
+        note: transcript,
+        metadata: {
+          source: 'voice_intent',
+        },
+        status: result.status,
+        resultMessage: result.resultMessage,
+        externalReferenceId: result.externalReferenceId,
+      })
+
+      this.sendToClient(clientId, {
+        type: 'gemini_response',
+        text: `Voice workflow executed (${action}): ${result.resultMessage}`,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      this.sendToClient(clientId, {
+        type: 'gemini_response',
+        text: `Voice workflow execution failed: ${message}`,
+      })
     }
   }
 

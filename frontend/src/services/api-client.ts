@@ -1,15 +1,26 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 
+type AuthTokenProvider = () => Promise<string | null>
+
+let authTokenProvider: AuthTokenProvider = async () => null
+
+export function setAuthTokenProvider(provider: AuthTokenProvider): void {
+  authTokenProvider = provider
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH'
   body?: unknown
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const token = await authTokenProvider()
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: options.method || 'GET',
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   })

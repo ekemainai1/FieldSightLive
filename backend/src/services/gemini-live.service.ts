@@ -31,7 +31,7 @@ interface ParsedGeminiPayload {
 type ChunkHandler = (textChunk: string) => void
 
 export interface LiveResponseEvent {
-  type: 'chunk' | 'final' | 'interrupted' | 'error'
+  type: 'chunk' | 'final' | 'interrupted' | 'error' | 'transcript'
   text?: string
   message?: string
 }
@@ -410,6 +410,7 @@ export class GeminiLiveService {
           interrupted?: boolean
           serverContent?: {
             modelTurn?: { parts?: Array<{ text?: string }> }
+            outputTranscription?: { text?: string }
             turnComplete?: boolean
           }
         }
@@ -423,6 +424,11 @@ export class GeminiLiveService {
         const serverContent = payload.serverContent
         if (!serverContent) {
           return
+        }
+
+        const transcriptText = serverContent.outputTranscription?.text?.trim()
+        if (transcriptText) {
+          session.handler({ type: 'transcript', text: transcriptText })
         }
 
         for (const part of serverContent.modelTurn?.parts ?? []) {

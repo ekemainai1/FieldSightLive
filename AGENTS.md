@@ -333,6 +333,17 @@ FieldSightLive/
 
 ## Development Plan
 
+### Current Progress (Updated)
+
+- [x] Phase 1 complete: repository structure, frontend/backend setup, CI pipeline, lint/typecheck/test scripts
+- [x] Phase 2 complete: camera streaming, push-to-talk, websocket, transcript UI, snapshot capture, frontend tests
+- [x] Phase 3 mostly complete: websocket gateway, Gemini integration (Live + fallback), interrupt handling, rate limiting, logging, backend tests
+- [x] Phase 4 complete: Firestore CRUD, GCS signed upload flow, history APIs, integration tests
+- [x] Phase 5 mostly complete: report generation + persistence + PDF endpoint + frontend preview/download panel
+- [ ] Phase 6/6b partial: offline mode and workflow automation integrations still pending
+- [ ] Phase 7 partial: load/security/perf profiling still pending
+- [ ] Phase 8 partial: production Cloud Run deployment and monitoring still pending
+
 ### Phase 1 — Project Setup (Week 1)
 
 **Goals:**
@@ -530,15 +541,14 @@ FieldSightLive/
 
 | Milestone | Target | Status |
 |-----------|--------|--------|
-| Project setup complete | Week 1 | [ ] |
-| Frontend core functional | Week 2 | [ ] |
-| Backend Gemini integration | Week 3 | [ ] |
-| Data layer complete | Week 3 | [ ] |
-| Reports generation | Week 4 | [ ] |
-| Safety features | Week 4 | [ ] |
+| Project setup complete | Week 1 | [x] |
+| Frontend core functional | Week 2 | [x] |
+| Backend Gemini integration | Week 3 | [x] (partial: auth/OCR hardening pending) |
+| Data layer complete | Week 3 | [x] |
+| Reports generation | Week 4 | [x] (partial: Cloud Functions async pipeline pending) |
+| Safety features | Week 4 | [ ] (partial implementation in app flow) |
 | Multi-site & workflow automation | Week 4 | [ ] |
-| Testing complete | Week 5 | [ ] |
-| Production deployment | Week 6 | [ ] |
+| Testing complete | Week 5 | [ ] (quality gates + major tests done; load/security pending) |
 | Production deployment | Week 6 | [ ] |
 
 ---

@@ -26,10 +26,12 @@ export interface GeminiResponse {
 export type WebSocketMessageType =
   | 'connected'
   | 'join_session'
+  | 'inspection_context'
   | 'video_frame'
   | 'audio'
   | 'audio_stream_end'
   | 'interrupt'
+  | 'live_transcript'
   | 'gemini_response_chunk'
   | 'gemini_response'
   | 'error'
@@ -47,9 +49,18 @@ export interface WebSocketService {
   sendVideoFrame: (frame: string) => void
   sendAudio: (payload: { pcmBase64: string; sampleRate: number; mimeType: string }) => void
   sendAudioEnd: () => void
+  sendInspectionContext: (inspectionId: string) => void
   sendInterrupt: () => void
   onMessage: (handler: MessageHandler) => () => void
   isConnected: boolean
+}
+
+type WebSocketAuthTokenProvider = () => Promise<string | null>
+
+let wsAuthTokenProvider: WebSocketAuthTokenProvider = async () => null
+
+export function setWebSocketAuthTokenProvider(provider: WebSocketAuthTokenProvider): void {
+  wsAuthTokenProvider = provider
 }
 
 export function createWebSocketService(url: string): WebSocketService {
@@ -78,6 +89,20 @@ export function createWebSocketService(url: string): WebSocketService {
     return Array.from(candidates)
   }
 
+  const withTokenIfPresent = (baseUrl: string, token: string | null): string => {
+    if (!token) {
+      return baseUrl
+    }
+
+    try {
+      const parsed = new URL(baseUrl)
+      parsed.searchParams.set('token', token)
+      return parsed.toString()
+    } catch {
+      return baseUrl
+    }
+  }
+
   const connect = (sessionId?: string) => {
     if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) {
       console.log('WebSocket already connected or connecting')
@@ -86,82 +111,84 @@ export function createWebSocketService(url: string): WebSocketService {
 
     intentionalDisconnect = false
     const wsUrl = url || process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws'
-    const candidates = buildCandidateUrls(wsUrl)
+    void wsAuthTokenProvider().then((token) => {
+      const candidates = buildCandidateUrls(wsUrl).map((candidate) => withTokenIfPresent(candidate, token))
 
-    const tryConnect = (index: number): void => {
-      if (index >= candidates.length) {
-        if (reconnectAttempts < maxReconnectAttempts && !intentionalDisconnect) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000)
-          reconnectTimeout = setTimeout(() => {
-            reconnectAttempts += 1
-            connect(sessionId)
-          }, delay)
-        }
-        return
-      }
-
-      const candidateUrl = candidates[index]
-      const socket = new WebSocket(candidateUrl)
-      ws = socket
-      let opened = false
-      let switched = false
-
-      socket.onopen = () => {
-        opened = true
-        reconnectAttempts = 0
-        console.log('WebSocket connected:', candidateUrl)
-
-        if (sessionId) {
-          socket.send(JSON.stringify({ type: 'join_session', sessionId }))
-        }
-      }
-
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data) as WebSocketMessage
-          notifyHandlers(message)
-        } catch (error) {
-          console.error('Failed to parse WebSocket message:', error)
-        }
-      }
-
-      socket.onerror = () => {
-        if (intentionalDisconnect || switched) return
-        if (!opened) {
-          switched = true
-          socket.close()
-          tryConnect(index + 1)
-          return
-        }
-        console.error('WebSocket runtime error on:', candidateUrl)
-      }
-
-      socket.onclose = (event) => {
-        if (intentionalDisconnect) return
-
-        if (!opened && !switched) {
-          switched = true
-          tryConnect(index + 1)
+      const tryConnect = (index: number): void => {
+        if (index >= candidates.length) {
+          if (reconnectAttempts < maxReconnectAttempts && !intentionalDisconnect) {
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000)
+            reconnectTimeout = setTimeout(() => {
+              reconnectAttempts += 1
+              connect(sessionId)
+            }, delay)
+          }
           return
         }
 
-        console.log('WebSocket disconnected', {
-          code: event.code,
-          reason: event.reason,
-          wasClean: event.wasClean,
-        })
+        const candidateUrl = candidates[index]
+        const socket = new WebSocket(candidateUrl)
+        ws = socket
+        let opened = false
+        let switched = false
 
-        if (reconnectAttempts < maxReconnectAttempts) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000)
-          reconnectTimeout = setTimeout(() => {
-            reconnectAttempts += 1
-            connect(sessionId)
-          }, delay)
+        socket.onopen = () => {
+          opened = true
+          reconnectAttempts = 0
+          console.log('WebSocket connected:', candidateUrl)
+
+          if (sessionId) {
+            socket.send(JSON.stringify({ type: 'join_session', sessionId }))
+          }
+        }
+
+        socket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data) as WebSocketMessage
+            notifyHandlers(message)
+          } catch (error) {
+            console.error('Failed to parse WebSocket message:', error)
+          }
+        }
+
+        socket.onerror = () => {
+          if (intentionalDisconnect || switched) return
+          if (!opened) {
+            switched = true
+            socket.close()
+            tryConnect(index + 1)
+            return
+          }
+          console.error('WebSocket runtime error on:', candidateUrl)
+        }
+
+        socket.onclose = (event) => {
+          if (intentionalDisconnect) return
+
+          if (!opened && !switched) {
+            switched = true
+            tryConnect(index + 1)
+            return
+          }
+
+          console.log('WebSocket disconnected', {
+            code: event.code,
+            reason: event.reason,
+            wasClean: event.wasClean,
+          })
+
+          if (reconnectAttempts < maxReconnectAttempts) {
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000)
+            reconnectTimeout = setTimeout(() => {
+              reconnectAttempts += 1
+              connect(sessionId)
+            }, delay)
+          }
         }
       }
-    }
 
-    tryConnect(0)
+      tryConnect(0)
+    })
   }
 
   const disconnect = () => {
@@ -207,6 +234,15 @@ export function createWebSocketService(url: string): WebSocketService {
     }
   }
 
+  const sendInspectionContext = (inspectionId: string) => {
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'inspection_context',
+        inspectionId,
+      }))
+    }
+  }
+
   const sendInterrupt = () => {
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'interrupt' }))
@@ -226,6 +262,7 @@ export function createWebSocketService(url: string): WebSocketService {
     sendVideoFrame,
     sendAudio,
     sendAudioEnd,
+    sendInspectionContext,
     sendInterrupt,
     onMessage,
     get isConnected(): boolean {

@@ -1,11 +1,12 @@
 import { apiRequest, uploadFileToSignedUrl } from './api-client'
 
-interface Inspection {
+export interface Inspection {
   id: string
   status: 'in_progress' | 'completed'
   technicianId?: string
   siteId?: string
   timestamp?: string
+  workflowEvents?: WorkflowActionEvent[]
 }
 
 interface SignedUploadResponse {
@@ -21,9 +22,37 @@ export interface InspectionReport {
   status: 'in_progress' | 'completed'
   findings: string[]
   safetySummary: string[]
+  workflowSummary: string[]
   recommendedActions: string[]
   imageCount: number
   summaryText: string
+}
+
+export interface InspectionOcrResult {
+  imageUrl: string
+  extractedText: string
+  serialNumbers: string[]
+  partCodes: string[]
+  meterReadings: string[]
+  warningLabels: string[]
+  confidence: number
+}
+
+export type WorkflowActionType =
+  | 'log_issue'
+  | 'create_ticket'
+  | 'notify_supervisor'
+  | 'add_to_history'
+
+export interface WorkflowActionEvent {
+  id: string
+  action: WorkflowActionType
+  note?: string
+  metadata?: Record<string, unknown>
+  status: 'completed' | 'failed'
+  resultMessage: string
+  externalReferenceId?: string
+  createdAt: string
 }
 
 interface CreateInspectionInput {
@@ -55,6 +84,10 @@ export class InspectionService {
     const query = params.toString()
     const path = query ? `/api/v1/inspections?${query}` : '/api/v1/inspections'
     return apiRequest<Inspection[]>(path)
+  }
+
+  public async getInspection(inspectionId: string): Promise<Inspection> {
+    return apiRequest<Inspection>(`/api/v1/inspections/${inspectionId}`)
   }
 
   public async completeInspection(
@@ -112,6 +145,27 @@ export class InspectionService {
       throw new Error(`Failed to download PDF: ${response.status}`)
     }
     return response.blob()
+  }
+
+  public async runOcr(inspectionId: string, imageUrl?: string): Promise<InspectionOcrResult> {
+    return apiRequest<InspectionOcrResult>(`/api/v1/inspections/${inspectionId}/ocr`, {
+      method: 'POST',
+      body: imageUrl ? { imageUrl } : {},
+    })
+  }
+
+  public async runWorkflowAction(
+    inspectionId: string,
+    action: WorkflowActionType,
+    note?: string,
+  ): Promise<WorkflowActionEvent> {
+    return apiRequest<WorkflowActionEvent>(`/api/v1/inspections/${inspectionId}/workflow-actions`, {
+      method: 'POST',
+      body: {
+        action,
+        note,
+      },
+    })
   }
 
   private dataUrlToBlob(dataUrl: string): Blob {

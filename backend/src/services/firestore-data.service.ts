@@ -1,6 +1,6 @@
 import { Firestore, Timestamp } from '@google-cloud/firestore'
 import { v4 as uuidv4 } from 'uuid'
-import type { Inspection, Site, Technician } from '../types'
+import type { Inspection, OcrFinding, Site, Technician, WorkflowEvent } from '../types'
 
 interface CreateInspectionInput {
   technicianId: string
@@ -26,6 +26,7 @@ export interface InspectionReport {
   status: 'in_progress' | 'completed'
   findings: string[]
   safetySummary: string[]
+  workflowSummary: string[]
   recommendedActions: string[]
   imageCount: number
   summaryText: string
@@ -90,6 +91,8 @@ export class FirestoreDataService {
       safetyFlags: [],
       detectedFaults: [],
       recommendedActions: [],
+      ocrFindings: [],
+      workflowEvents: [],
       transcript: '',
     }
 
@@ -159,6 +162,53 @@ export class FirestoreDataService {
     })
   }
 
+  public async appendInspectionOcrFinding(inspectionId: string, finding: Omit<OcrFinding, 'createdAt'>): Promise<void> {
+    const ref = this.db.collection('inspections').doc(inspectionId)
+    await this.db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref)
+      if (!snap.exists) {
+        throw new Error('Inspection not found')
+      }
+
+      const data = snap.data() as Record<string, unknown>
+      const ocrFindings = Array.isArray(data.ocrFindings)
+        ? (data.ocrFindings as Record<string, unknown>[])
+        : []
+
+      ocrFindings.push(this.serializeDates({ ...finding, createdAt: new Date() }) as Record<string, unknown>)
+      tx.set(ref, { ocrFindings }, { merge: true })
+    })
+  }
+
+  public async appendInspectionWorkflowEvent(
+    inspectionId: string,
+    event: Omit<WorkflowEvent, 'id' | 'createdAt'>,
+  ): Promise<WorkflowEvent> {
+    const ref = this.db.collection('inspections').doc(inspectionId)
+    const nextEvent: WorkflowEvent = {
+      id: uuidv4(),
+      ...event,
+      createdAt: new Date(),
+    }
+
+    await this.db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref)
+      if (!snap.exists) {
+        throw new Error('Inspection not found')
+      }
+
+      const data = snap.data() as Record<string, unknown>
+      const workflowEvents = Array.isArray(data.workflowEvents)
+        ? (data.workflowEvents as Record<string, unknown>[])
+        : []
+
+      workflowEvents.push(this.serializeDates(nextEvent) as unknown as Record<string, unknown>)
+      tx.set(ref, { workflowEvents }, { merge: true })
+    })
+
+    return nextEvent
+  }
+
   public async generateInspectionReport(inspectionId: string): Promise<InspectionReport | null> {
     const inspection = await this.getInspectionById(inspectionId)
     if (!inspection) {
@@ -173,6 +223,12 @@ export class FirestoreDataService {
       (flag) => `${flag.severity.toUpperCase()} - ${flag.description}`,
     )
 
+    const workflowSummary = inspection.workflowEvents.map((event) => {
+      const status = event.status.toUpperCase()
+      const reference = event.externalReferenceId ? ` (${event.externalReferenceId})` : ''
+      return `${status} - ${event.action}: ${event.resultMessage}${reference}`
+    })
+
     const report: InspectionReport = {
       inspectionId: inspection.id,
       generatedAt: new Date(),
@@ -181,6 +237,7 @@ export class FirestoreDataService {
       status: inspection.status,
       findings,
       safetySummary,
+      workflowSummary,
       recommendedActions: inspection.recommendedActions,
       imageCount: inspection.images.length,
       summaryText:
@@ -214,6 +271,9 @@ export class FirestoreDataService {
         : [],
       safetySummary: Array.isArray(data.safetySummary)
         ? data.safetySummary.filter((v): v is string => typeof v === 'string')
+        : [],
+      workflowSummary: Array.isArray(data.workflowSummary)
+        ? data.workflowSummary.filter((v): v is string => typeof v === 'string')
         : [],
       recommendedActions: Array.isArray(data.recommendedActions)
         ? data.recommendedActions.filter((v): v is string => typeof v === 'string')
@@ -257,6 +317,54 @@ export class FirestoreDataService {
         : [],
       recommendedActions: Array.isArray(data.recommendedActions)
         ? data.recommendedActions.filter((v): v is string => typeof v === 'string')
+        : [],
+      ocrFindings: Array.isArray(data.ocrFindings)
+        ? data.ocrFindings.map((item) => {
+            const entry = item as Record<string, unknown>
+            return {
+              imageUrl: typeof entry.imageUrl === 'string' ? entry.imageUrl : '',
+              extractedText: typeof entry.extractedText === 'string' ? entry.extractedText : '',
+              serialNumbers: Array.isArray(entry.serialNumbers)
+                ? entry.serialNumbers.filter((v): v is string => typeof v === 'string')
+                : [],
+              partCodes: Array.isArray(entry.partCodes)
+                ? entry.partCodes.filter((v): v is string => typeof v === 'string')
+                : [],
+              meterReadings: Array.isArray(entry.meterReadings)
+                ? entry.meterReadings.filter((v): v is string => typeof v === 'string')
+                : [],
+              warningLabels: Array.isArray(entry.warningLabels)
+                ? entry.warningLabels.filter((v): v is string => typeof v === 'string')
+                : [],
+              confidence: typeof entry.confidence === 'number' ? entry.confidence : 0,
+              createdAt: this.deserializeDate(entry.createdAt),
+            }
+          })
+        : [],
+      workflowEvents: Array.isArray(data.workflowEvents)
+        ? data.workflowEvents.map((item) => {
+            const entry = item as Record<string, unknown>
+            return {
+              id: typeof entry.id === 'string' ? entry.id : uuidv4(),
+              action:
+                entry.action === 'create_ticket' ||
+                entry.action === 'notify_supervisor' ||
+                entry.action === 'add_to_history' ||
+                entry.action === 'log_issue'
+                  ? entry.action
+                  : 'log_issue',
+              note: typeof entry.note === 'string' ? entry.note : undefined,
+              metadata:
+                entry.metadata && typeof entry.metadata === 'object'
+                  ? (entry.metadata as Record<string, unknown>)
+                  : undefined,
+              status: entry.status === 'failed' ? 'failed' : 'completed',
+              resultMessage: typeof entry.resultMessage === 'string' ? entry.resultMessage : '',
+              externalReferenceId:
+                typeof entry.externalReferenceId === 'string' ? entry.externalReferenceId : undefined,
+              createdAt: this.deserializeDate(entry.createdAt),
+            }
+          })
         : [],
       transcript: typeof data.transcript === 'string' ? data.transcript : '',
       summary: typeof data.summary === 'string' ? data.summary : undefined,

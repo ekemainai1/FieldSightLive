@@ -21,6 +21,8 @@ interface SetupPanelProps {
   siteId: string
   onTechnicianChange: (id: string) => void
   onSiteChange: (id: string) => void
+  canAccessApi: boolean
+  accessMessage?: string
 }
 
 export function SetupPanel({
@@ -28,6 +30,8 @@ export function SetupPanel({
   siteId,
   onTechnicianChange,
   onSiteChange,
+  canAccessApi,
+  accessMessage,
 }: SetupPanelProps) {
   const [technicians, setTechnicians] = useState<Technician[]>([])
   const [sites, setSites] = useState<Site[]>([])
@@ -39,10 +43,18 @@ export function SetupPanel({
   const [newSiteType, setNewSiteType] = useState<Site['type']>('power')
 
   useEffect(() => {
+    if (!canAccessApi) {
+      setError(accessMessage || 'Sign in to load setup data.')
+      return
+    }
     void loadData()
-  }, [])
+  }, [canAccessApi, accessMessage])
 
   async function loadData() {
+    if (!canAccessApi) {
+      setError(accessMessage || 'Sign in to load setup data.')
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -67,6 +79,10 @@ export function SetupPanel({
   }
 
   async function createTechnician() {
+    if (!canAccessApi) {
+      setError(accessMessage || 'Sign in to create technicians.')
+      return
+    }
     if (!newTechName || !newTechEmail) return
     setLoading(true)
     setError(null)
@@ -92,6 +108,10 @@ export function SetupPanel({
   }
 
   async function createSite() {
+    if (!canAccessApi) {
+      setError(accessMessage || 'Sign in to create sites.')
+      return
+    }
     if (!newSiteName) return
     setLoading(true)
     setError(null)
@@ -141,6 +161,7 @@ export function SetupPanel({
             className="w-full rounded border px-2 py-2 text-sm"
             value={technicianId}
             onChange={(e) => onTechnicianChange(e.target.value)}
+            disabled={!canAccessApi || loading}
           >
             <option value="">Select technician</option>
             {technicians.map((tech) => (
@@ -155,17 +176,19 @@ export function SetupPanel({
               placeholder="Name"
               value={newTechName}
               onChange={(e) => setNewTechName(e.target.value)}
+              disabled={!canAccessApi || loading}
             />
             <input
               className="flex-1 rounded border px-2 py-1 text-xs"
               placeholder="Email"
               value={newTechEmail}
               onChange={(e) => setNewTechEmail(e.target.value)}
+              disabled={!canAccessApi || loading}
             />
             <button
               onClick={() => void createTechnician()}
               className="px-2 py-1 text-xs rounded bg-primary text-primary-foreground"
-              disabled={loading}
+              disabled={!canAccessApi || loading}
             >
               Add
             </button>
@@ -178,6 +201,7 @@ export function SetupPanel({
             className="w-full rounded border px-2 py-2 text-sm"
             value={siteId}
             onChange={(e) => onSiteChange(e.target.value)}
+            disabled={!canAccessApi || loading}
           >
             <option value="">Select site</option>
             {sites.map((site) => (
@@ -192,11 +216,13 @@ export function SetupPanel({
               placeholder="Site name"
               value={newSiteName}
               onChange={(e) => setNewSiteName(e.target.value)}
+              disabled={!canAccessApi || loading}
             />
             <select
               className="rounded border px-2 py-1 text-xs"
               value={newSiteType}
               onChange={(e) => setNewSiteType(e.target.value as Site['type'])}
+              disabled={!canAccessApi || loading}
             >
               <option value="power">power</option>
               <option value="oil_gas">oil_gas</option>
@@ -207,7 +233,7 @@ export function SetupPanel({
             <button
               onClick={() => void createSite()}
               className="px-2 py-1 text-xs rounded bg-primary text-primary-foreground"
-              disabled={loading}
+              disabled={!canAccessApi || loading}
             >
               Add
             </button>

@@ -31,4 +31,13 @@ describe('incomingMessageSchema', () => {
 
     expect(result.success).toBe(true)
   })
+
+  it('should accept inspection context payload', () => {
+    const result = incomingMessageSchema.safeParse({
+      type: 'inspection_context',
+      inspectionId: 'insp-123',
+    })
+
+    expect(result.success).toBe(true)
+  })
 })

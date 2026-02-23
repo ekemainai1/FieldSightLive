@@ -32,6 +32,9 @@ export function ReportPanel({ report, onRefresh, onDownloadPdf }: ReportPanelPro
       'Safety Flags',
       ...(report.safetySummary.length > 0 ? report.safetySummary : ['- None']),
       '',
+      'Workflow Actions',
+      ...(report.workflowSummary.length > 0 ? report.workflowSummary : ['- None']),
+      '',
       'Recommended Actions',
       ...(report.recommendedActions.length > 0 ? report.recommendedActions : ['- None']),
     ].join('\n')
@@ -86,13 +89,15 @@ export function ReportPanel({ report, onRefresh, onDownloadPdf }: ReportPanelPro
             <p className="text-xs text-muted-foreground">Summary</p>
             <p>{report.summaryText}</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <Metric label="Findings" value={report.findings.length} />
             <Metric label="Safety Flags" value={report.safetySummary.length} />
+            <Metric label="Workflow" value={report.workflowSummary.length} />
             <Metric label="Images" value={report.imageCount} />
           </div>
           <ListBlock title="Findings" items={report.findings} />
           <ListBlock title="Safety Flags" items={report.safetySummary} />
+          <ListBlock title="Workflow Actions" items={report.workflowSummary} />
           <ListBlock title="Recommended Actions" items={report.recommendedActions} />
         </div>
       )}

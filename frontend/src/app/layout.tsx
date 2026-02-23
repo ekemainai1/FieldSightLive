@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { SidebarNav } from '@/components/SidebarNav'
 
 export const metadata: Metadata = {
   title: 'FieldSight Live',
@@ -13,7 +14,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <div className="min-h-screen md:flex">
+          <SidebarNav />
+          <main className="flex-1">{children}</main>
+        </div>
+      </body>
     </html>
   )
 }

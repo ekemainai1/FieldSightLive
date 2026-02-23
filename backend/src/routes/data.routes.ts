@@ -2,7 +2,10 @@ import { Router } from 'express'
 import { z } from 'zod'
 import type { InspectionReport } from '../services/firestore-data.service'
 import { FirestoreDataService } from '../services/firestore-data.service'
+import type { OcrExtractionResult } from '../services/equipment-ocr.service'
+import type { WorkflowActionResult } from '../services/workflow-automation.service'
 import { StorageService } from '../services/storage.service'
+import type { WorkflowActionType } from '../types'
 
 interface StorageServiceLike {
   createSignedUploadUrl: StorageService['createSignedUploadUrl']
@@ -10,6 +13,19 @@ interface StorageServiceLike {
 
 interface ReportPdfServiceLike {
   renderInspectionReportPdf: (report: InspectionReport) => Promise<Buffer>
+}
+
+interface EquipmentOcrServiceLike {
+  extractFromImageUrl: (imageUrl: string) => Promise<OcrExtractionResult>
+}
+
+interface WorkflowAutomationServiceLike {
+  runAction: (input: {
+    inspectionId: string
+    action: WorkflowActionType
+    note?: string
+    metadata?: Record<string, unknown>
+  }) => Promise<WorkflowActionResult>
 }
 
 const createTechnicianSchema = z.object({
@@ -48,10 +64,22 @@ const attachImageSchema = z.object({
   imageUrl: z.string().url(),
 })
 
+const ocrRequestSchema = z.object({
+  imageUrl: z.string().url().optional(),
+})
+
+const workflowActionSchema = z.object({
+  action: z.enum(['log_issue', 'create_ticket', 'notify_supervisor', 'add_to_history']),
+  note: z.string().trim().max(500).optional(),
+  metadata: z.record(z.unknown()).optional(),
+})
+
 export function createDataRouter(
   firestoreService: FirestoreDataService,
   storageService: StorageServiceLike,
   reportPdfService: ReportPdfServiceLike,
+  ocrService: EquipmentOcrServiceLike,
+  workflowAutomationService: WorkflowAutomationServiceLike,
 ): Router {
   const router = Router()
 
@@ -203,6 +231,76 @@ export function createDataRouter(
     res.setHeader('Content-Type', 'application/pdf')
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
     res.status(200).send(pdfBuffer)
+  })
+
+  router.post('/inspections/:inspectionId/ocr', async (req, res) => {
+    const parsed = ocrRequestSchema.safeParse(req.body || {})
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid OCR payload', details: parsed.error.flatten() })
+      return
+    }
+
+    const inspection = await firestoreService.getInspectionById(req.params.inspectionId)
+    if (!inspection) {
+      res.status(404).json({ error: 'Inspection not found' })
+      return
+    }
+
+    const imageUrl = parsed.data.imageUrl || inspection.images[inspection.images.length - 1]
+    if (!imageUrl) {
+      res.status(400).json({ error: 'No image found for OCR. Capture/upload an image first.' })
+      return
+    }
+
+    try {
+      const extracted = await ocrService.extractFromImageUrl(imageUrl)
+      await firestoreService.appendInspectionOcrFinding(req.params.inspectionId, {
+        imageUrl: extracted.imageUrl,
+        extractedText: extracted.extractedText,
+        serialNumbers: extracted.serialNumbers,
+        partCodes: extracted.partCodes,
+        meterReadings: extracted.meterReadings,
+        warningLabels: extracted.warningLabels,
+        confidence: extracted.confidence,
+      })
+      res.json(extracted)
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to run OCR extraction',
+      })
+    }
+  })
+
+  router.post('/inspections/:inspectionId/workflow-actions', async (req, res) => {
+    const parsed = workflowActionSchema.safeParse(req.body || {})
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid workflow action payload', details: parsed.error.flatten() })
+      return
+    }
+
+    const inspection = await firestoreService.getInspectionById(req.params.inspectionId)
+    if (!inspection) {
+      res.status(404).json({ error: 'Inspection not found' })
+      return
+    }
+
+    const result = await workflowAutomationService.runAction({
+      inspectionId: req.params.inspectionId,
+      action: parsed.data.action,
+      note: parsed.data.note,
+      metadata: parsed.data.metadata,
+    })
+
+    const event = await firestoreService.appendInspectionWorkflowEvent(req.params.inspectionId, {
+      action: parsed.data.action,
+      note: parsed.data.note,
+      metadata: parsed.data.metadata,
+      status: result.status,
+      resultMessage: result.resultMessage,
+      externalReferenceId: result.externalReferenceId,
+    })
+
+    res.status(201).json(event)
   })
 
   return router

@@ -22,6 +22,7 @@ describe('ReportPanel', () => {
           status: 'completed',
           findings: ['Valve misalignment'],
           safetySummary: ['HIGH - PPE missing'],
+          workflowSummary: ['COMPLETED - create_ticket: Ticket created (wf_123)'],
           recommendedActions: ['Wear gloves'],
           imageCount: 2,
           summaryText: 'Inspection summary text',
@@ -34,6 +35,7 @@ describe('ReportPanel', () => {
     expect(screen.getByText('Inspection summary text')).toBeInTheDocument()
     expect(screen.getByText('Valve misalignment')).toBeInTheDocument()
     expect(screen.getByText('HIGH - PPE missing')).toBeInTheDocument()
+    expect(screen.getByText('COMPLETED - create_ticket: Ticket created (wf_123)')).toBeInTheDocument()
     expect(screen.getByText('Wear gloves')).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('Refresh'))

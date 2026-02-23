@@ -29,12 +29,18 @@ const interruptSchema = z.object({
   type: z.literal('interrupt'),
 })
 
+const inspectionContextSchema = z.object({
+  type: z.literal('inspection_context'),
+  inspectionId: z.string().min(1).max(128),
+})
+
 export const incomingMessageSchema = z.discriminatedUnion('type', [
   joinSessionSchema,
   videoFrameSchema,
   audioSchema,
   audioStreamEndSchema,
   interruptSchema,
+  inspectionContextSchema,
 ])
 
 export type IncomingMessage = z.infer<typeof incomingMessageSchema>

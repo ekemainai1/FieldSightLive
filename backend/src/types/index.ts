@@ -31,8 +31,34 @@ export interface Inspection {
   safetyFlags: SafetyFlag[]
   detectedFaults: DetectedFault[]
   recommendedActions: string[]
+  ocrFindings: OcrFinding[]
+  workflowEvents: WorkflowEvent[]
   transcript: string
   summary?: string
+}
+
+export type WorkflowActionType = 'log_issue' | 'create_ticket' | 'notify_supervisor' | 'add_to_history'
+
+export interface WorkflowEvent {
+  id: string
+  action: WorkflowActionType
+  note?: string
+  metadata?: Record<string, unknown>
+  status: 'completed' | 'failed'
+  resultMessage: string
+  externalReferenceId?: string
+  createdAt: Date
+}
+
+export interface OcrFinding {
+  imageUrl: string
+  extractedText: string
+  serialNumbers: string[]
+  partCodes: string[]
+  meterReadings: string[]
+  warningLabels: string[]
+  confidence: number
+  createdAt: Date
 }
 
 export interface SafetyFlag {

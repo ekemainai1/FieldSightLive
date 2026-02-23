@@ -25,6 +25,7 @@ export class ReportPdfService {
       this.writeSection(doc, 'Summary', [report.summaryText])
       this.writeSection(doc, 'Findings', report.findings)
       this.writeSection(doc, 'Safety Flags', report.safetySummary)
+      this.writeSection(doc, 'Workflow Actions', report.workflowSummary)
       this.writeSection(doc, 'Recommended Actions', report.recommendedActions)
 
       doc.end()

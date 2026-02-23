@@ -29,10 +29,43 @@ describeIfEmulator('Data routes integration (Firestore emulator)', () => {
       return Buffer.from('pdf-bytes')
     },
   }
+  const ocrService = {
+    async extractFromImageUrl(imageUrl: string) {
+      return {
+        imageUrl,
+        extractedText: 'SN-123 PART-77 220psi',
+        serialNumbers: ['SN-123'],
+        partCodes: ['PART-77'],
+        meterReadings: ['220psi'],
+        warningLabels: ['HIGH VOLTAGE'],
+        confidence: 0.9,
+      }
+    },
+  }
+  const workflowAutomationService = {
+    async runAction(input: { action: string; note?: string }) {
+      return {
+        status: 'completed' as const,
+        resultMessage: input.note
+          ? `${input.action} completed: ${input.note}`
+          : `${input.action} completed`,
+        externalReferenceId: 'wf_123',
+      }
+    },
+  }
 
   const app = express()
   app.use(express.json())
-  app.use('/api/v1', createDataRouter(dataService, storageService, reportPdfService))
+  app.use(
+    '/api/v1',
+    createDataRouter(
+      dataService,
+      storageService,
+      reportPdfService,
+      ocrService,
+      workflowAutomationService,
+    ),
+  )
 
   beforeAll(async () => {
     await clearCollection('technicians')
@@ -111,6 +144,36 @@ describeIfEmulator('Data routes integration (Firestore emulator)', () => {
     const reportPdfRes = await request(app).get(`/api/v1/inspections/${inspectionId}/report.pdf`)
     expect(reportPdfRes.status).toBe(200)
     expect(reportPdfRes.headers['content-type']).toContain('application/pdf')
+
+    const ocrRes = await request(app).post(`/api/v1/inspections/${inspectionId}/ocr`).send({
+      imageUrl: signedRes.body.publicUrl,
+    })
+    expect(ocrRes.status).toBe(200)
+    expect(ocrRes.body.serialNumbers).toContain('SN-123')
+
+    const inspectionAfterOcrRes = await request(app).get(`/api/v1/inspections/${inspectionId}`)
+    expect(inspectionAfterOcrRes.status).toBe(200)
+    expect(Array.isArray(inspectionAfterOcrRes.body.ocrFindings)).toBe(true)
+    expect(inspectionAfterOcrRes.body.ocrFindings.length).toBeGreaterThan(0)
+
+    const workflowRes = await request(app)
+      .post(`/api/v1/inspections/${inspectionId}/workflow-actions`)
+      .send({
+        action: 'create_ticket',
+        note: 'Pressure anomaly detected near valve A3',
+      })
+    expect(workflowRes.status).toBe(201)
+    expect(workflowRes.body.action).toBe('create_ticket')
+
+    const inspectionAfterWorkflow = await request(app).get(`/api/v1/inspections/${inspectionId}`)
+    expect(inspectionAfterWorkflow.status).toBe(200)
+    expect(Array.isArray(inspectionAfterWorkflow.body.workflowEvents)).toBe(true)
+    expect(inspectionAfterWorkflow.body.workflowEvents.length).toBeGreaterThan(0)
+
+    const reportWithWorkflowRes = await request(app).post(`/api/v1/inspections/${inspectionId}/report`)
+    expect(reportWithWorkflowRes.status).toBe(201)
+    expect(Array.isArray(reportWithWorkflowRes.body.workflowSummary)).toBe(true)
+    expect(reportWithWorkflowRes.body.workflowSummary.length).toBeGreaterThan(0)
   })
 
   async function clearCollection(collectionName: string): Promise<void> {
