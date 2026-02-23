@@ -1,0 +1,169 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import Home from './page'
+
+const wsServiceMock = {
+  connect: jest.fn(),
+  disconnect: jest.fn(),
+  sendVideoFrame: jest.fn(),
+  sendAudio: jest.fn(),
+  sendAudioEnd: jest.fn(),
+  sendInterrupt: jest.fn(),
+  onMessage: jest.fn(() => () => undefined),
+  isConnected: true,
+}
+
+jest.mock('@/components/SetupPanel', () => ({
+  SetupPanel: () => <div data-testid="setup-panel">setup</div>,
+}))
+
+jest.mock('@/components/HistoryPanel', () => ({
+  HistoryPanel: () => <div data-testid="history-panel">history</div>,
+}))
+
+jest.mock('@/components/VideoPlayer', () => ({
+  VideoPlayer: require('react').forwardRef(() => <div data-testid="video-player">video</div>),
+}))
+
+jest.mock('@/components/Transcript', () => ({
+  Transcript: () => <div data-testid="transcript">transcript</div>,
+}))
+
+jest.mock('@/components/Controls', () => ({
+  Controls: ({ onStartCamera, onCaptureSnapshot, onStopCamera }: {
+    onStartCamera: () => void
+    onCaptureSnapshot: () => void
+    onStopCamera: () => void
+  }) => (
+    <div>
+      <button onClick={onStartCamera}>Start Camera</button>
+      <button onClick={onCaptureSnapshot}>Snapshot</button>
+      <button onClick={onStopCamera}>Stop Camera</button>
+    </div>
+  ),
+}))
+
+jest.mock('@/hooks/useWebRTC', () => ({
+  useWebRTC: () => ({
+    stream: null,
+    videoRef: { current: null },
+    startStream: jest.fn(async () => undefined),
+    stopStream: jest.fn(),
+    captureFrame: jest.fn(() => 'data:image/jpeg;base64,aGVsbG8='),
+    state: {
+      isStreaming: false,
+      isLoading: false,
+      error: null,
+    },
+  }),
+}))
+
+jest.mock('@/hooks/useAudioCapture', () => ({
+  useAudioCapture: () => ({
+    startRecording: jest.fn(async () => undefined),
+    stopRecording: jest.fn(async () => undefined),
+    state: {
+      isRecording: false,
+      isProcessing: false,
+      error: null,
+      audioLevel: 0,
+    },
+  }),
+}))
+
+jest.mock('@/hooks/useInspectionSession', () => {
+  const React = require('react') as typeof import('react')
+  return {
+    useInspectionSession: () => {
+      const [latestReport, setLatestReport] = React.useState<null | {
+        inspectionId: string
+        generatedAt: string
+        status: 'completed'
+        findings: string[]
+        safetySummary: string[]
+        recommendedActions: string[]
+        imageCount: number
+        summaryText: string
+      }>(null)
+
+      return {
+        inspectionId: 'insp-flow-1',
+        isBusy: false,
+        error: null,
+        latestReport,
+        startInspection: jest.fn(async () => 'insp-flow-1'),
+        uploadSnapshot: jest.fn(async () => 'https://storage.example/snapshot.jpg'),
+        completeInspection: jest.fn(async () => {
+          const report = {
+            inspectionId: 'insp-flow-1',
+            generatedAt: new Date().toISOString(),
+            status: 'completed' as const,
+            findings: ['Valve misalignment'],
+            safetySummary: ['HIGH - PPE missing'],
+            recommendedActions: ['Wear gloves'],
+            imageCount: 1,
+            summaryText: 'Inspection summary text',
+          }
+          setLatestReport(report)
+          return report
+        }),
+        refreshLatestReport: jest.fn(async () => latestReport),
+        loadReportForInspection: jest.fn(async () => latestReport),
+        downloadLatestReportPdf: jest.fn(async () => new Blob(['pdf'], { type: 'application/pdf' })),
+      }
+    },
+  }
+})
+
+jest.mock('@/services/websocket', () => ({
+  getWebSocketService: () => wsServiceMock,
+}))
+
+const addMessageMock = jest.fn()
+
+jest.mock('@/lib/store', () => ({
+  useAppStore: (selector: (state: {
+    sessionId: string
+    setSessionId: (id: string) => void
+    setConnected: (v: boolean) => void
+    addMessage: (...args: unknown[]) => void
+    messages: unknown[]
+    safetyFlags: unknown[]
+    detectedFaults: unknown[]
+    addSafetyFlag: (...args: unknown[]) => void
+    addDetectedFault: (...args: unknown[]) => void
+  }) => unknown) => {
+    const state = {
+      sessionId: 'session-flow-1',
+      setSessionId: jest.fn(),
+      setConnected: jest.fn(),
+      addMessage: addMessageMock,
+      messages: [],
+      safetyFlags: [],
+      detectedFaults: [],
+      addSafetyFlag: jest.fn(),
+      addDetectedFault: jest.fn(),
+    }
+    return selector(state)
+  },
+}))
+
+describe('Home flow (E2E-style component test)', () => {
+  beforeAll(() => {
+    process.env.NEXT_PUBLIC_DEFAULT_TECHNICIAN_ID = 'tech-flow-1'
+    process.env.NEXT_PUBLIC_DEFAULT_SITE_ID = 'site-flow-1'
+  })
+
+  it('should run start -> snapshot -> complete and show report', async () => {
+    render(<Home />)
+
+    fireEvent.click(screen.getByText('Start Camera'))
+    fireEvent.click(screen.getByText('Snapshot'))
+    fireEvent.click(screen.getByText('Stop Camera'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Inspection summary text')).toBeInTheDocument()
+      expect(screen.getByText('Valve misalignment')).toBeInTheDocument()
+      expect(screen.getByText('HIGH - PPE missing')).toBeInTheDocument()
+    })
+  })
+})
