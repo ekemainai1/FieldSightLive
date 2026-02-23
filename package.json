@@ -1,0 +1,14 @@
+{
+  "name": "fieldsight-live",
+  "private": true,
+  "scripts": {
+    "quality:frontend": "npm --prefix frontend run lint && npm --prefix frontend run typecheck && npm --prefix frontend run build",
+    "quality:backend": "npm --prefix backend run lint && npm --prefix backend run build",
+    "quality:ci": "npm run quality:frontend && npm run quality:backend",
+    "test:ci": "node scripts/run-ci-tests.mjs",
+    "test:ci:emulator": "node scripts/run-ci-tests.mjs --emulator",
+    "test:ci:frontend": "npm --prefix frontend run test:ci",
+    "test:ci:backend": "npm --prefix backend run test:ci",
+    "test:ci:backend:emulator": "npm --prefix backend run test:ci:emulator"
+  }
+}
