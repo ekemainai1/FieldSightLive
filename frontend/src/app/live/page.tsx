@@ -31,6 +31,20 @@ export default function LivePage() {
   const inspection = useInspectionSession()
   const wsService = getWebSocketService()
   const [lastSnapshotUrl, setLastSnapshotUrl] = useState<string | null>(null)
+  const [pendingVoiceConfirmation, setPendingVoiceConfirmation] = useState<{
+    action: string
+    expiresAt: number
+  } | null>(null)
+  const [confirmationNow, setConfirmationNow] = useState<number>(Date.now())
+
+  useEffect(() => {
+    if (!pendingVoiceConfirmation) {
+      return
+    }
+
+    const timer = setInterval(() => setConfirmationNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [pendingVoiceConfirmation])
 
   useEffect(() => {
     if (!sessionId) {
@@ -51,6 +65,27 @@ export default function LivePage() {
         case 'live_transcript':
           if (typeof message.text === 'string' && message.text.trim().length > 0) {
             addMessage({ type: 'user', text: message.text })
+          }
+          break
+        case 'workflow_confirmation':
+          if (message.status === 'pending') {
+            const action = typeof message.action === 'string' ? message.action : 'workflow_action'
+            const expiresAt =
+              typeof message.expiresAt === 'number' ? message.expiresAt : Date.now() + 30000
+            setPendingVoiceConfirmation({ action, expiresAt })
+            addMessage({
+              type: 'system',
+              text: `WF_CONFIRM|pending|${action}|Awaiting voice confirmation`,
+            })
+          } else {
+            setPendingVoiceConfirmation(null)
+            const status =
+              typeof message.status === 'string' ? message.status : 'expired'
+            const action = typeof message.action === 'string' ? message.action : 'workflow_action'
+            addMessage({
+              type: 'system',
+              text: `WF_CONFIRM|${status}|${action}|Voice confirmation ${status}`,
+            })
           }
           break
         case 'gemini_response':
@@ -74,7 +109,24 @@ export default function LivePage() {
     })
 
     return () => unsubscribe()
-  }, [wsService, setConnected, addMessage, addSafetyFlag, addDetectedFault, inspection.inspectionId])
+  }, [
+    wsService,
+    setConnected,
+    addMessage,
+    addSafetyFlag,
+    addDetectedFault,
+    inspection.inspectionId,
+  ])
+
+  const confirmationSecondsLeft = pendingVoiceConfirmation
+    ? Math.max(0, Math.ceil((pendingVoiceConfirmation.expiresAt - confirmationNow) / 1000))
+    : 0
+
+  useEffect(() => {
+    if (pendingVoiceConfirmation && confirmationSecondsLeft === 0) {
+      setPendingVoiceConfirmation(null)
+    }
+  }, [pendingVoiceConfirmation, confirmationSecondsLeft])
 
   useEffect(() => {
     if (webRTCState.isStreaming && sessionId) {
@@ -86,10 +138,26 @@ export default function LivePage() {
   }, [webRTCState.isStreaming, sessionId, wsService])
 
   const handleStartRecording = useCallback(async () => {
+    if (inspection.isOffline) {
+      addMessage({
+        type: 'system',
+        text: 'Offline mode: voice streaming is unavailable. Capture snapshots and sync later.',
+      })
+      return
+    }
+
+    if (!wsService.isConnected) {
+      addMessage({
+        type: 'system',
+        text: 'WebSocket not connected. Make sure camera is streaming first.',
+      })
+      return
+    }
+
     await startRecording((chunk) => {
       wsService.sendAudio(chunk)
     })
-  }, [startRecording, wsService])
+  }, [addMessage, inspection.isOffline, startRecording, wsService])
 
   const handleStopRecording = useCallback(async () => {
     await stopRecording()
@@ -100,10 +168,24 @@ export default function LivePage() {
   const handleCaptureSnapshot = useCallback(() => {
     const frame = captureFrame()
     if (frame) {
-      wsService.sendVideoFrame(frame)
+      if (!inspection.isOffline) {
+        wsService.sendVideoFrame(frame)
+      }
       addMessage({ type: 'system', text: 'Snapshot captured' })
       void inspection.uploadSnapshot(frame)
         .then((imageUrl) => {
+          if (imageUrl.startsWith('offline://')) {
+            addMessage({
+              type: 'system',
+              text: 'Snapshot queued for sync. It will upload automatically when network is back.',
+            })
+            addMessage({
+              type: 'system',
+              text: 'Offline safety note: live AI detections pause while disconnected.',
+            })
+            return
+          }
+
           setLastSnapshotUrl(imageUrl)
           addMessage({ type: 'system', text: `Snapshot uploaded: ${imageUrl}` })
         })
@@ -112,9 +194,14 @@ export default function LivePage() {
           addMessage({ type: 'system', text: `Snapshot upload failed: ${message}` })
         })
     }
-  }, [captureFrame, wsService, addMessage, inspection])
+  }, [addMessage, captureFrame, inspection, wsService])
 
   const handleRunOcr = useCallback(() => {
+    if (inspection.isOffline) {
+      addMessage({ type: 'system', text: 'Offline mode: OCR requires network connectivity.' })
+      return
+    }
+
     if (!inspection.inspectionId) {
       addMessage({ type: 'system', text: 'Start an inspection first before running OCR.' })
       return
@@ -139,7 +226,7 @@ export default function LivePage() {
         const message = error instanceof Error ? error.message : 'OCR failed'
         addMessage({ type: 'system', text: `OCR failed: ${message}` })
       })
-  }, [addMessage, inspection.inspectionId, lastSnapshotUrl])
+  }, [addMessage, inspection.inspectionId, inspection.isOffline, lastSnapshotUrl])
 
   const handleInterrupt = useCallback(() => {
     wsService.sendInterrupt()
@@ -195,19 +282,35 @@ export default function LivePage() {
 
   const handleStopCamera = useCallback(() => {
     stopStream()
+    const hadInspection = Boolean(inspection.inspectionId)
+
     void inspection.completeInspection('Inspection closed from camera stop.')
       .then((report) => {
+        if (!hadInspection && !report) {
+          return
+        }
         addMessage({
           type: 'system',
           text: report
             ? `Inspection completed. Report ready: ${report.inspectionId}`
-            : 'Inspection completed.',
+            : 'Inspection queued for completion. It will sync when network is back.',
         })
       })
       .catch(() => {
         // ignore when no inspection exists
       })
   }, [addMessage, inspection, stopStream])
+
+  const handleSyncOfflineQueue = useCallback(() => {
+    void inspection.syncPendingOperations()
+      .then(() => {
+        addMessage({ type: 'system', text: 'Offline queue sync completed.' })
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : 'Offline sync failed'
+        addMessage({ type: 'system', text: `Offline sync failed: ${message}` })
+      })
+  }, [addMessage, inspection])
 
   return (
     <div className="p-6 space-y-6">
@@ -230,6 +333,29 @@ export default function LivePage() {
         )}
       </div>
 
+      <div className="rounded border p-3 text-sm flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <span className="font-medium">Connectivity:</span>{' '}
+          {inspection.isOffline ? (
+            <span className="text-amber-600">Offline mode active</span>
+          ) : (
+            <span className="text-emerald-600">Online</span>
+          )}
+          <span className="text-muted-foreground">
+            {` | Pending sync items: ${inspection.pendingSyncCount}`}
+          </span>
+        </div>
+        {!inspection.isOffline && inspection.pendingSyncCount > 0 ? (
+          <button
+            className="px-3 py-2 rounded bg-secondary hover:bg-secondary/80 text-xs"
+            onClick={handleSyncOfflineQueue}
+            disabled={inspection.isSyncing}
+          >
+            {inspection.isSyncing ? 'Syncing...' : 'Sync offline queue'}
+          </button>
+        ) : null}
+      </div>
+
       <div className="rounded border bg-card p-4 space-y-2">
         <p className="text-sm font-semibold">Voice Commands</p>
         <p className="text-xs text-muted-foreground">
@@ -241,6 +367,16 @@ export default function LivePage() {
           <div className="rounded border p-2">"Log this issue"</div>
           <div className="rounded border p-2">"Add this to history"</div>
         </div>
+        <p className="text-xs text-muted-foreground">
+          For external actions, the system asks for confirmation. Say "confirm" to proceed or
+          "cancel" to abort.
+        </p>
+        {pendingVoiceConfirmation ? (
+          <div className="rounded border border-amber-500/40 bg-amber-100/50 p-2 text-xs">
+            Pending confirmation: <span className="font-semibold">{pendingVoiceConfirmation.action}</span>{' '}
+            ({confirmationSecondsLeft}s)
+          </div>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

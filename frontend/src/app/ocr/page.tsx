@@ -11,17 +11,27 @@ export default function OcrPage() {
   const [loading, setLoading] = useState(false)
 
   async function runOcr() {
-    if (!inspectionId) {
-      setError('Inspection ID is required.')
+    if (!inspectionId.trim()) {
+      setError('Inspection ID is required. Start an inspection from the Live page first.')
       return
     }
     setLoading(true)
     setError(null)
+    setResult(null)
     try {
-      const data = await inspectionService.runOcr(inspectionId, imageUrl || undefined)
+      const data = await inspectionService.runOcr(inspectionId.trim(), imageUrl || undefined)
       setResult(data)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to run OCR')
+      const message = err instanceof Error ? err.message : 'Failed to run OCR'
+      if (message.includes('404') || message.includes('not found')) {
+        setError(`Inspection "${inspectionId}" not found. Make sure the inspection ID is correct and you started it from the Live page.`)
+      } else if (message.includes('No image')) {
+        setError('No image found for this inspection. Capture a snapshot from the Live page first, then try again.')
+      } else if (message.includes('fetch')) {
+        setError('Could not access the image. Make sure the image URL is publicly accessible.')
+      } else {
+        setError(message)
+      }
       setResult(null)
     } finally {
       setLoading(false)
@@ -38,16 +48,19 @@ export default function OcrPage() {
       </header>
 
       <div className="rounded border p-4 space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Run OCR on equipment images. First start an inspection and capture snapshots from the Live page.
+        </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <input
             className="rounded border px-3 py-2 text-sm"
-            placeholder="Inspection ID"
+            placeholder="Inspection ID (e.g., inspection_1234567890)"
             value={inspectionId}
             onChange={(e) => setInspectionId(e.target.value)}
           />
           <input
             className="rounded border px-3 py-2 text-sm"
-            placeholder="Optional image URL (leave blank for latest image)"
+            placeholder="Image URL (optional - uses latest snapshot if empty)"
             value={imageUrl}
             onChange={(e) => setImageUrl(e.target.value)}
           />

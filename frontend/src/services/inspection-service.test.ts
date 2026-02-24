@@ -1,4 +1,5 @@
 import { inspectionService } from './inspection-service'
+import { setAuthTokenProvider } from './api-client'
 
 describe('inspectionService (API-level with fetch mocking)', () => {
   const fetchMock = jest.fn()
@@ -6,6 +7,7 @@ describe('inspectionService (API-level with fetch mocking)', () => {
   beforeEach(() => {
     fetchMock.mockReset()
     global.fetch = fetchMock as unknown as typeof fetch
+    setAuthTokenProvider(async () => null)
   })
 
   it('should create inspection via API', async () => {
@@ -77,6 +79,7 @@ describe('inspectionService (API-level with fetch mocking)', () => {
   })
 
   it('should download report PDF as blob', async () => {
+    setAuthTokenProvider(async () => 'token-123')
     const mockBlob = new Blob(['pdf'], { type: 'application/pdf' })
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -88,6 +91,12 @@ describe('inspectionService (API-level with fetch mocking)', () => {
     expect(result).toBe(mockBlob)
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8080/api/v1/inspections/insp-77/report.pdf',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-123',
+        }),
+      }),
     )
   })
 

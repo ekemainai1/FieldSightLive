@@ -15,6 +15,56 @@ interface TranscriptProps {
   detectedFaults: DetectedFault[]
 }
 
+type WorkflowConfirmationStatus = 'pending' | 'confirmed' | 'cancelled' | 'expired'
+
+interface ParsedWorkflowConfirmation {
+  status: WorkflowConfirmationStatus
+  action: string
+  label: string
+}
+
+function parseWorkflowConfirmation(text: string): ParsedWorkflowConfirmation | null {
+  if (!text.startsWith('WF_CONFIRM|')) {
+    return null
+  }
+
+  const parts = text.split('|')
+  if (parts.length < 4) {
+    return null
+  }
+
+  const rawStatus = parts[1]
+  if (
+    rawStatus !== 'pending' &&
+    rawStatus !== 'confirmed' &&
+    rawStatus !== 'cancelled' &&
+    rawStatus !== 'expired'
+  ) {
+    return null
+  }
+
+  const action = parts[2] || 'workflow_action'
+  const label = parts.slice(3).join('|') || `Voice confirmation ${rawStatus}`
+  return {
+    status: rawStatus,
+    action,
+    label,
+  }
+}
+
+function getWorkflowChipClass(status: WorkflowConfirmationStatus): string {
+  if (status === 'pending') {
+    return 'bg-amber-100 text-amber-800 border-amber-300'
+  }
+  if (status === 'confirmed') {
+    return 'bg-emerald-100 text-emerald-800 border-emerald-300'
+  }
+  if (status === 'cancelled') {
+    return 'bg-slate-100 text-slate-700 border-slate-300'
+  }
+  return 'bg-rose-100 text-rose-700 border-rose-300'
+}
+
 function formatTimeClient(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString()
 }
@@ -70,6 +120,26 @@ export function Transcript({ messages, safetyFlags, detectedFaults }: Transcript
               key={msg.id}
               className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
             >
+              {(() => {
+                const workflow = parseWorkflowConfirmation(msg.text)
+                if (workflow) {
+                  return (
+                    <div className="max-w-[80%] rounded-lg px-4 py-2 bg-muted text-muted-foreground text-sm">
+                      <div
+                        className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] font-semibold ${getWorkflowChipClass(workflow.status)}`}
+                      >
+                        {workflow.status.toUpperCase()}
+                      </div>
+                      <p className="text-sm mt-2">{workflow.action}</p>
+                      <p className="text-xs opacity-80">{workflow.label}</p>
+                      <span className="text-xs opacity-50">
+                        {formatTimeClient(msg.timestamp)}
+                      </span>
+                    </div>
+                  )
+                }
+
+                return (
               <div
                 className={`max-w-[80%] rounded-lg px-4 py-2 ${
                   msg.type === 'user'
@@ -84,6 +154,8 @@ export function Transcript({ messages, safetyFlags, detectedFaults }: Transcript
                   {formatTimeClient(msg.timestamp)}
                 </span>
               </div>
+                )
+              })()}
             </div>
           ))
         )}

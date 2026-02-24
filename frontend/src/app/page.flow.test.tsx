@@ -28,6 +28,7 @@ const inspectionSessionMocks = {
     imageCount: 1,
     summaryText: 'Inspection summary text',
   })),
+  syncPendingOperations: jest.fn(async () => undefined),
 }
 
 jest.mock('@/components/VideoPlayer', () => ({
@@ -98,11 +99,15 @@ jest.mock('@/hooks/useInspectionSession', () => {
       return {
         inspectionId: null,
         isBusy: false,
+        isSyncing: false,
+        isOffline: false,
+        pendingSyncCount: 0,
         error: null,
         latestReport,
         startInspection: inspectionSessionMocks.startInspection,
         uploadSnapshot: inspectionSessionMocks.uploadSnapshot,
         completeInspection: inspectionSessionMocks.completeInspection,
+        syncPendingOperations: inspectionSessionMocks.syncPendingOperations,
         refreshLatestReport: jest.fn(async () => latestReport),
         loadReportForInspection: jest.fn(async () => latestReport),
         downloadLatestReportPdf: jest.fn(async () => new Blob(['pdf'], { type: 'application/pdf' })),
@@ -157,6 +162,7 @@ describe('Home flow (E2E-style component test)', () => {
     inspectionSessionMocks.startInspection.mockClear()
     inspectionSessionMocks.uploadSnapshot.mockClear()
     inspectionSessionMocks.completeInspection.mockClear()
+    inspectionSessionMocks.syncPendingOperations.mockClear()
   })
 
   it('should run start -> snapshot -> complete and show report', async () => {

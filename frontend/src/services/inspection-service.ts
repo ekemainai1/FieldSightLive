@@ -1,4 +1,4 @@
-import { apiRequest, uploadFileToSignedUrl } from './api-client'
+import { apiRequest, apiRequestBlob, uploadFileToSignedUrl } from './api-client'
 
 export interface Inspection {
   id: string
@@ -129,7 +129,7 @@ export class InspectionService {
   }
 
   public async generateReport(inspectionId: string): Promise<InspectionReport> {
-    return apiRequest<InspectionReport>(`/api/v1/inspections/${inspectionId}/report`, {
+    return apiRequest<InspectionReport>(`/api/v1/inspections/${inspectionId}/report?mode=sync`, {
       method: 'POST',
     })
   }
@@ -139,12 +139,7 @@ export class InspectionService {
   }
 
   public async downloadReportPdf(inspectionId: string): Promise<Blob> {
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
-    const response = await fetch(`${baseUrl}/api/v1/inspections/${inspectionId}/report.pdf`)
-    if (!response.ok) {
-      throw new Error(`Failed to download PDF: ${response.status}`)
-    }
-    return response.blob()
+    return apiRequestBlob(`/api/v1/inspections/${inspectionId}/report.pdf`)
   }
 
   public async runOcr(inspectionId: string, imageUrl?: string): Promise<InspectionOcrResult> {

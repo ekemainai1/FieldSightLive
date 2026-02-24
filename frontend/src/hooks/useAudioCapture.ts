@@ -89,10 +89,10 @@ export function useAudioCapture(): AudioCaptureHooks {
 
     setState((prev) => ({ ...prev, audioLevel: normalizedLevel }))
 
-    if (state.isRecording) {
+    if (mediaStreamRef.current) {
       animationFrameRef.current = requestAnimationFrame(updateAudioLevel)
     }
-  }, [state.isRecording])
+  }, [])
 
   const startRecording = useCallback(async (onChunk: (chunk: {
     pcmBase64: string

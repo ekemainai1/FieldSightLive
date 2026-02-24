@@ -8,8 +8,8 @@ voice guidance, safety detection, and report generation.
 - Frontend: Next.js 16 + TypeScript + WebRTC + TailwindCSS
 - Backend: Node.js + TypeScript + WebSocket + Express
 - AI: Gemini Live API (+ direct Gemini fallback)
-- Data: Firestore
-- Storage: Google Cloud Storage signed uploads
+- Data: Firestore (prod) or PostgreSQL (dev/local)
+- Storage: GCS signed uploads (prod) or MinIO signed uploads (dev/local)
 
 ## Monorepo Structure
 
@@ -34,6 +34,29 @@ cp frontend/.env.example frontend/.env.local
 ```
 
 Update values in `backend/.env` and `frontend/.env.local`.
+
+For local development without GCP services, set in `backend/.env`:
+
+```bash
+DATA_PROVIDER="postgres"
+STORAGE_PROVIDER="minio"
+POSTGRES_URL="postgresql://postgres:postgres@localhost:5432/fieldsightlive"
+MINIO_ENDPOINT="localhost"
+MINIO_PORT="9000"
+MINIO_USE_SSL="false"
+MINIO_ACCESS_KEY="minioadmin"
+MINIO_SECRET_KEY="minioadmin"
+MINIO_BUCKET_NAME="fieldsightlive-dev"
+MINIO_PUBLIC_BASE_URL="http://localhost:9000"
+```
+
+For production, use:
+
+```bash
+DATA_PROVIDER="firestore"
+STORAGE_PROVIDER="gcs"
+GCS_BUCKET_NAME="your-prod-bucket"
+```
 
 ### 3) Run locally
 
@@ -69,16 +92,33 @@ Open `http://localhost:3000`.
 - `POST /api/v1/inspections/:inspectionId/snapshots/signed-url`
 - `POST /api/v1/inspections/:inspectionId/snapshots/attach`
 - `POST /api/v1/inspections/:inspectionId/report`
+- `POST /api/v1/inspections/:inspectionId/report?mode=sync`
 - `GET /api/v1/inspections/:inspectionId/report`
 - `GET /api/v1/inspections/:inspectionId/report.pdf`
+- `GET /api/v1/inspections/:inspectionId/report/jobs/latest`
+- `GET /api/v1/inspections/:inspectionId/report/jobs/:jobId`
 - `POST /api/v1/inspections/:inspectionId/ocr`
 - `POST /api/v1/inspections/:inspectionId/workflow-actions`
+  - Optional idempotency support: send `X-Idempotency-Key` header (or `idempotencyKey` in body)
+  - External webhook actions (`create_ticket`, `notify_supervisor`) use retry with backoff
+  - Provider adapters available via env: `generic` (default), `jira`, `servicenow`
+  - Jira adapter defaults to `/rest/api/3/issue` when only base host is configured
+  - ServiceNow adapter supports `/api/now/table/{table}` and proxy webhook payload mode
+
+Report generation endpoint behavior:
+- default `POST /report`: async queue (returns `202` with job metadata)
+- `POST /report?mode=sync`: synchronous generation (returns generated report)
+- Pub/Sub worker target for Cloud Functions: `backend/src/functions/report-generation.function.ts`
+  (`generateInspectionReportFromPubSub`)
 
 Voice-triggered workflow intents are also supported during live sessions when transcript includes phrases like:
 - "create ticket"
 - "notify my supervisor"
 - "log this issue"
 - "add this to history"
+
+External actions (`create ticket`, `notify my supervisor`) require an explicit follow-up
+confirmation phrase (`confirm`) and can be aborted with `cancel`.
 
 ## Testing and Quality
 

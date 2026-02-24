@@ -1,4 +1,8 @@
-import { detectWorkflowIntent } from './workflow-intents'
+import {
+  detectWorkflowConfirmationDecision,
+  detectWorkflowIntent,
+  requiresVoiceConfirmation,
+} from './workflow-intents'
 
 describe('detectWorkflowIntent', () => {
   it('should detect create_ticket phrases', () => {
@@ -20,5 +24,19 @@ describe('detectWorkflowIntent', () => {
 
   it('should return null for non-workflow transcript', () => {
     expect(detectWorkflowIntent('zoom in on the gauge')).toBeNull()
+  })
+
+  it('should require confirmation for external actions only', () => {
+    expect(requiresVoiceConfirmation('create_ticket')).toBe(true)
+    expect(requiresVoiceConfirmation('notify_supervisor')).toBe(true)
+    expect(requiresVoiceConfirmation('log_issue')).toBe(false)
+  })
+
+  it('should detect confirmation decisions', () => {
+    expect(detectWorkflowConfirmationDecision('confirm')).toBe('confirm')
+    expect(detectWorkflowConfirmationDecision('yes, proceed')).toBe('confirm')
+    expect(detectWorkflowConfirmationDecision('cancel that')).toBe('cancel')
+    expect(detectWorkflowConfirmationDecision('never mind')).toBe('cancel')
+    expect(detectWorkflowConfirmationDecision('continue inspection')).toBeNull()
   })
 })

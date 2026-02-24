@@ -8,18 +8,28 @@ import { v4 as uuidv4 } from 'uuid'
 import winston from 'winston'
 import { GeminiLiveService, type LiveResponseEvent } from './services/gemini-live.service'
 import { AuthService } from './services/auth.service'
+import type { DataService } from './services/data-service'
 import { EquipmentOcrService } from './services/equipment-ocr.service'
 import { FirestoreDataService } from './services/firestore-data.service'
+import { MinioStorageService } from './services/minio-storage.service'
+import { PostgresDataService } from './services/postgres-data.service'
 import { ReportPdfService } from './services/report-pdf.service'
+import { ReportPipelineService } from './services/report-pipeline.service'
 import { StorageService } from './services/storage.service'
 import { WorkflowAutomationService } from './services/workflow-automation.service'
 import { createDataRouter } from './routes/data.routes'
 import { incomingMessageSchema, type IncomingMessage } from './utils/ws-validation'
-import { detectWorkflowIntent } from './utils/workflow-intents'
+import {
+  detectWorkflowConfirmationDecision,
+  detectWorkflowIntent,
+  requiresVoiceConfirmation,
+} from './utils/workflow-intents'
 import { SlidingWindowRateLimiter } from './utils/rate-limiter'
 import type {
   AudioMessage,
   AudioStreamEndMessage,
+  GeminiResponse,
+  WorkflowActionType,
   VideoFrameMessage,
   WebSocketMessage,
 } from './types'
@@ -41,6 +51,13 @@ interface WebSocketClient {
   sessionId?: string
 }
 
+interface PendingVoiceWorkflowConfirmation {
+  inspectionId: string
+  action: WorkflowActionType
+  transcript: string
+  createdAt: number
+}
+
 class App {
   public app: Application
   public server: ReturnType<typeof createServer>
@@ -48,19 +65,22 @@ class App {
   private clients: Map<string, WebSocketClient> = new Map()
   private inspectionContextByClient: Map<string, string> = new Map()
   private lastVoiceIntentByClient: Map<string, { action: string; at: number }> = new Map()
+  private pendingVoiceConfirmations: Map<string, PendingVoiceWorkflowConfirmation> = new Map()
   private liveSessionEnabled: Map<string, boolean> = new Map()
   private audioChunkBuffers: Map<string, { chunks: string[]; mimeType: string; sampleRate: number }> = new Map()
   private geminiLiveService = new GeminiLiveService()
   private authService = new AuthService()
   private ocrService = new EquipmentOcrService()
-  private firestoreService = new FirestoreDataService()
+  private dataService: DataService
   private reportPdfService = new ReportPdfService()
-  private storageService = new StorageService()
+  private reportPipelineService: ReportPipelineService
+  private storageService: StorageService | MinioStorageService
   private workflowAutomationService = new WorkflowAutomationService()
   private rateLimiter: SlidingWindowRateLimiter
 
   private readonly RATE_WINDOW_MS = 10_000
   private readonly RATE_MAX_MESSAGES = 400
+  private readonly VOICE_CONFIRM_TTL_MS = 30_000
 
   constructor() {
     this.app = express()
@@ -68,6 +88,9 @@ class App {
     this.wss = new WebSocketServer({
       server: this.server,
     })
+    this.dataService = this.createDataService()
+    this.reportPipelineService = new ReportPipelineService(this.dataService, logger)
+    this.storageService = this.createStorageService()
     this.rateLimiter = new SlidingWindowRateLimiter(this.RATE_WINDOW_MS, this.RATE_MAX_MESSAGES)
 
     this.middleware()
@@ -81,15 +104,49 @@ class App {
       logger.info(`Auth required: ${this.authService.isAuthRequired()}`)
       logger.info(`WebSocket available at ws://localhost:${port}/ws`)
       logger.info(`WebSocket also accepts ws://localhost:${port}`)
+      logger.info(`Data provider: ${this.getDataProvider()}`)
+      logger.info(`Storage provider: ${this.getStorageProvider()}`)
     })
+  }
+
+  private getDataProvider(): 'firestore' | 'postgres' {
+    const configured = process.env.DATA_PROVIDER?.trim().toLowerCase()
+    if (configured === 'firestore' || configured === 'postgres') {
+      return configured
+    }
+    return process.env.NODE_ENV === 'production' ? 'firestore' : 'postgres'
+  }
+
+  private getStorageProvider(): 'gcs' | 'minio' {
+    const configured = process.env.STORAGE_PROVIDER?.trim().toLowerCase()
+    if (configured === 'gcs' || configured === 'minio') {
+      return configured
+    }
+    return process.env.NODE_ENV === 'production' ? 'gcs' : 'minio'
+  }
+
+  private createDataService(): DataService {
+    const provider = this.getDataProvider()
+    if (provider === 'firestore') {
+      return new FirestoreDataService()
+    }
+    return new PostgresDataService()
+  }
+
+  private createStorageService(): StorageService | MinioStorageService {
+    const provider = this.getStorageProvider()
+    if (provider === 'gcs') {
+      return new StorageService()
+    }
+    return new MinioStorageService()
   }
 
   private middleware(): void {
     this.app.use(helmet())
     this.app.use(cors({
       origin: '*',
-      methods: ['GET', 'POST'],
-      allowedHeaders: ['Content-Type'],
+      methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
     }))
     this.app.use(express.json({ limit: '10mb' }))
     this.app.use(express.urlencoded({ extended: true }))
@@ -115,6 +172,14 @@ class App {
         status: 'running',
         clients: this.clients.size,
         version: '1.0.0',
+        providers: {
+          data: this.getDataProvider(),
+          storage: this.getStorageProvider(),
+          storageConfigured:
+            typeof this.storageService.isConfigured === 'function'
+              ? this.storageService.isConfigured()
+              : false,
+        },
       })
     })
 
@@ -161,8 +226,9 @@ class App {
     this.app.use(
       '/api/v1',
       createDataRouter(
-        this.firestoreService,
+        this.dataService,
         this.storageService,
+        this.reportPipelineService,
         this.reportPdfService,
         this.ocrService,
         this.workflowAutomationService,
@@ -219,6 +285,7 @@ class App {
         this.audioChunkBuffers.delete(clientId)
         this.inspectionContextByClient.delete(clientId)
         this.lastVoiceIntentByClient.delete(clientId)
+        this.pendingVoiceConfirmations.delete(clientId)
         this.rateLimiter.clear(clientId)
         this.clients.delete(clientId)
         logger.info(`WebSocket client disconnected: ${clientId}`)
@@ -285,6 +352,7 @@ class App {
 
         case 'inspection_context':
           this.inspectionContextByClient.set(clientId, message.inspectionId)
+          this.pendingVoiceConfirmations.delete(clientId)
           this.sendToClient(clientId, {
             type: 'gemini_response',
             text: `Inspection context set to ${message.inspectionId}`,
@@ -325,6 +393,7 @@ class App {
     try {
       const response = await this.geminiLiveService.analyzeVideoFrame(message)
       this.sendToClient(client.id, response)
+      void this.persistGeminiResponse(client.id, response)
     } catch (error) {
       logger.error(`Video frame processing failed for ${client.id}:`, error)
       this.sendToClient(client.id, {
@@ -392,6 +461,7 @@ class App {
       try {
         const response = await this.geminiLiveService.analyzeAudio(combinedMessage)
         this.sendToClient(client.id, response)
+        void this.persistGeminiResponse(client.id, response)
       } catch (error) {
         logger.error(`Fallback audio processing failed for ${client.id}:`, error)
         this.sendToClient(client.id, {
@@ -416,6 +486,7 @@ class App {
   private async processInterrupt(client: WebSocketClient): Promise<void> {
     const response = await this.geminiLiveService.handleInterrupt()
     this.sendToClient(client.id, response)
+    void this.persistGeminiResponse(client.id, response)
   }
 
   private forwardLiveEventToClient(clientId: string, event: LiveResponseEvent): void {
@@ -432,6 +503,7 @@ class App {
         type: 'gemini_response',
         text: event.text,
       })
+      void this.persistTranscriptEntry(clientId, 'agent', event.text)
       return
     }
 
@@ -454,66 +526,150 @@ class App {
         speaker: 'user',
         text: event.text,
       })
+      void this.persistTranscriptEntry(clientId, 'user', event.text)
       void this.triggerWorkflowFromTranscript(clientId, event.text)
     }
   }
 
+  private async persistGeminiResponse(clientId: string, response: GeminiResponse): Promise<void> {
+    const inspectionId = this.inspectionContextByClient.get(clientId)
+    if (!inspectionId) {
+      return
+    }
+
+    try {
+      if (typeof response.text === 'string' && response.text.trim().length > 0) {
+        await this.dataService.appendInspectionTranscript(inspectionId, `agent: ${response.text.trim()}`)
+      }
+
+      if (Array.isArray(response.safetyFlags) && response.safetyFlags.length > 0) {
+        await this.dataService.appendInspectionSafetyFlags(inspectionId, response.safetyFlags)
+      }
+
+      if (Array.isArray(response.detectedFaults) && response.detectedFaults.length > 0) {
+        await this.dataService.appendInspectionDetectedFaults(inspectionId, response.detectedFaults)
+      }
+    } catch (error) {
+      this.logPersistenceError(clientId, inspectionId, error)
+    }
+  }
+
+  private async persistTranscriptEntry(
+    clientId: string,
+    speaker: 'user' | 'agent',
+    text: string,
+  ): Promise<void> {
+    const inspectionId = this.inspectionContextByClient.get(clientId)
+    if (!inspectionId) {
+      return
+    }
+
+    try {
+      const trimmed = text.trim()
+      if (!trimmed) {
+        return
+      }
+      await this.dataService.appendInspectionTranscript(inspectionId, `${speaker}: ${trimmed}`)
+    } catch (error) {
+      this.logPersistenceError(clientId, inspectionId, error)
+    }
+  }
+
+  private logPersistenceError(clientId: string, inspectionId: string, error: unknown): void {
+    logger.warn('Failed to persist inspection update', {
+      clientId,
+      inspectionId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+
   private async triggerWorkflowFromTranscript(clientId: string, transcript: string): Promise<void> {
     try {
+      const inspectionId = this.inspectionContextByClient.get(clientId)
+      if (!inspectionId) {
+        return
+      }
+
+      let pending = this.pendingVoiceConfirmations.get(clientId)
+      if (pending && pending.inspectionId !== inspectionId) {
+        this.pendingVoiceConfirmations.delete(clientId)
+        pending = undefined
+      }
+
+      if (pending && Date.now() - pending.createdAt > this.VOICE_CONFIRM_TTL_MS) {
+        this.pendingVoiceConfirmations.delete(clientId)
+        this.sendToClient(clientId, {
+          type: 'workflow_confirmation',
+          status: 'expired',
+          action: pending.action,
+        })
+        this.sendToClient(clientId, {
+          type: 'gemini_response',
+          text: `Pending ${pending.action} confirmation expired. Say the command again.`,
+        })
+        pending = undefined
+      }
+
+      const confirmationDecision = detectWorkflowConfirmationDecision(transcript)
+      if (pending && pending.inspectionId === inspectionId) {
+        if (confirmationDecision === 'confirm') {
+          this.pendingVoiceConfirmations.delete(clientId)
+          this.sendToClient(clientId, {
+            type: 'workflow_confirmation',
+            status: 'confirmed',
+            action: pending.action,
+          })
+          await this.executeVoiceWorkflowAction(
+            clientId,
+            inspectionId,
+            pending.action,
+            pending.transcript,
+            true,
+          )
+          return
+        }
+
+        if (confirmationDecision === 'cancel') {
+          this.pendingVoiceConfirmations.delete(clientId)
+          this.sendToClient(clientId, {
+            type: 'workflow_confirmation',
+            status: 'cancelled',
+            action: pending.action,
+          })
+          this.sendToClient(clientId, {
+            type: 'gemini_response',
+            text: `Cancelled pending ${pending.action} action.`,
+          })
+          return
+        }
+      }
+
       const action = detectWorkflowIntent(transcript)
       if (!action) {
         return
       }
 
-      const inspectionId = this.inspectionContextByClient.get(clientId)
-      if (!inspectionId) {
+      if (requiresVoiceConfirmation(action)) {
+        this.pendingVoiceConfirmations.set(clientId, {
+          inspectionId,
+          action,
+          transcript,
+          createdAt: Date.now(),
+        })
+        this.sendToClient(clientId, {
+          type: 'workflow_confirmation',
+          status: 'pending',
+          action,
+          expiresAt: Date.now() + this.VOICE_CONFIRM_TTL_MS,
+        })
         this.sendToClient(clientId, {
           type: 'gemini_response',
-          text: 'Workflow intent heard, but no active inspection context is set.',
+          text: `I heard ${action}. Say confirm to proceed or cancel to abort.`,
         })
         return
       }
 
-      const previous = this.lastVoiceIntentByClient.get(clientId)
-      const now = Date.now()
-      if (previous && previous.action === action && now - previous.at < 15_000) {
-        return
-      }
-      this.lastVoiceIntentByClient.set(clientId, { action, at: now })
-
-      const inspection = await this.firestoreService.getInspectionById(inspectionId)
-      if (!inspection) {
-        this.sendToClient(clientId, {
-          type: 'gemini_response',
-          text: `Workflow intent skipped because inspection ${inspectionId} was not found.`,
-        })
-        return
-      }
-
-      const result = await this.workflowAutomationService.runAction({
-        inspectionId,
-        action,
-        note: transcript,
-        metadata: {
-          source: 'voice_intent',
-        },
-      })
-
-      await this.firestoreService.appendInspectionWorkflowEvent(inspectionId, {
-        action,
-        note: transcript,
-        metadata: {
-          source: 'voice_intent',
-        },
-        status: result.status,
-        resultMessage: result.resultMessage,
-        externalReferenceId: result.externalReferenceId,
-      })
-
-      this.sendToClient(clientId, {
-        type: 'gemini_response',
-        text: `Voice workflow executed (${action}): ${result.resultMessage}`,
-      })
+      await this.executeVoiceWorkflowAction(clientId, inspectionId, action, transcript, false)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       this.sendToClient(clientId, {
@@ -521,6 +677,57 @@ class App {
         text: `Voice workflow execution failed: ${message}`,
       })
     }
+  }
+
+  private async executeVoiceWorkflowAction(
+    clientId: string,
+    inspectionId: string,
+    action: WorkflowActionType,
+    transcript: string,
+    wasConfirmed: boolean,
+  ): Promise<void> {
+    const previous = this.lastVoiceIntentByClient.get(clientId)
+    const now = Date.now()
+    if (previous && previous.action === action && now - previous.at < 15_000) {
+      return
+    }
+    this.lastVoiceIntentByClient.set(clientId, { action, at: now })
+
+    const inspection = await this.dataService.getInspectionById(inspectionId)
+    if (!inspection) {
+      this.sendToClient(clientId, {
+        type: 'gemini_response',
+        text: `Workflow intent skipped because inspection ${inspectionId} was not found.`,
+      })
+      return
+    }
+
+    const result = await this.workflowAutomationService.runAction({
+      inspectionId,
+      action,
+      note: transcript,
+      metadata: {
+        source: 'voice_intent',
+        confirmation: wasConfirmed ? 'confirmed' : 'not_required',
+      },
+    })
+
+    await this.dataService.appendInspectionWorkflowEvent(inspectionId, {
+      action,
+      note: transcript,
+      metadata: {
+        source: 'voice_intent',
+        confirmation: wasConfirmed ? 'confirmed' : 'not_required',
+      },
+      status: result.status,
+      resultMessage: result.resultMessage,
+      externalReferenceId: result.externalReferenceId,
+    })
+
+    this.sendToClient(clientId, {
+      type: 'gemini_response',
+      text: `Voice workflow executed (${action}): ${result.resultMessage}`,
+    })
   }
 
   public sendToClient(clientId: string, data: unknown): void {

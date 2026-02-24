@@ -32,6 +32,7 @@ export type WebSocketMessageType =
   | 'audio_stream_end'
   | 'interrupt'
   | 'live_transcript'
+  | 'workflow_confirmation'
   | 'gemini_response_chunk'
   | 'gemini_response'
   | 'error'
@@ -214,24 +215,28 @@ export function createWebSocketService(url: string): WebSocketService {
   }
 
   const sendAudio = (payload: { pcmBase64: string; sampleRate: number; mimeType: string }) => {
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'audio',
-        audio: payload.pcmBase64,
-        mimeType: payload.mimeType,
-        sampleRate: payload.sampleRate,
-        timestamp: Date.now(),
-      }))
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn('WebSocket not connected, audio chunk dropped')
+      return
     }
+    ws.send(JSON.stringify({
+      type: 'audio',
+      audio: payload.pcmBase64,
+      mimeType: payload.mimeType,
+      sampleRate: payload.sampleRate,
+      timestamp: Date.now(),
+    }))
   }
 
   const sendAudioEnd = () => {
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'audio_stream_end',
-        timestamp: Date.now(),
-      }))
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn('WebSocket not connected, audio end signal dropped')
+      return
     }
+    ws.send(JSON.stringify({
+      type: 'audio_stream_end',
+      timestamp: Date.now(),
+    }))
   }
 
   const sendInspectionContext = (inspectionId: string) => {

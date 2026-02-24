@@ -48,7 +48,7 @@ jobs:
   test-emulator:
     name: Emulator Integration Profile
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && inputs.run_emulator == true
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_emulator == 'true'
 
     steps:
       - name: Checkout

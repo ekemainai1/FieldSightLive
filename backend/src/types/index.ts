@@ -21,6 +21,18 @@ export interface Site {
   updatedAt: Date
 }
 
+export interface SiteAsset {
+  id: string
+  siteId: string
+  name: string
+  assetType: string
+  serialNumber?: string
+  location?: string
+  notes?: string
+  createdAt: Date
+  updatedAt: Date
+}
+
 export interface Inspection {
   id: string
   technicianId: string

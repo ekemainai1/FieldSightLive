@@ -1,6 +1,15 @@
 import { Firestore, Timestamp } from '@google-cloud/firestore'
 import { v4 as uuidv4 } from 'uuid'
-import type { Inspection, OcrFinding, Site, Technician, WorkflowEvent } from '../types'
+import type {
+  DetectedFault,
+  Inspection,
+  OcrFinding,
+  SafetyFlag,
+  Site,
+  SiteAsset,
+  Technician,
+  WorkflowEvent,
+} from '../types'
 
 interface CreateInspectionInput {
   technicianId: string
@@ -145,6 +154,88 @@ export class FirestoreDataService {
     await ref.set(patch, { merge: true })
     const updated = await ref.get()
     return this.deserializeInspection(updated.data() as Record<string, unknown>)
+  }
+
+  public async appendInspectionSafetyFlags(inspectionId: string, flags: SafetyFlag[]): Promise<void> {
+    if (flags.length === 0) {
+      return
+    }
+
+    const ref = this.db.collection('inspections').doc(inspectionId)
+    await this.db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref)
+      if (!snap.exists) {
+        throw new Error('Inspection not found')
+      }
+
+      const data = snap.data() as Record<string, unknown>
+      const safetyFlags = Array.isArray(data.safetyFlags)
+        ? (data.safetyFlags as Record<string, unknown>[])
+        : []
+      const nextFlags = flags.map((flag) =>
+        this.serializeDates({
+          type: flag.type,
+          severity: flag.severity,
+          description: flag.description,
+          timestamp: flag.timestamp,
+        }) as unknown as Record<string, unknown>,
+      )
+      safetyFlags.push(...nextFlags)
+      tx.set(ref, { safetyFlags }, { merge: true })
+    })
+  }
+
+  public async appendInspectionDetectedFaults(
+    inspectionId: string,
+    faults: DetectedFault[],
+  ): Promise<void> {
+    if (faults.length === 0) {
+      return
+    }
+
+    const ref = this.db.collection('inspections').doc(inspectionId)
+    await this.db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref)
+      if (!snap.exists) {
+        throw new Error('Inspection not found')
+      }
+
+      const data = snap.data() as Record<string, unknown>
+      const detectedFaults = Array.isArray(data.detectedFaults)
+        ? (data.detectedFaults as Record<string, unknown>[])
+        : []
+      const nextFaults = faults.map((fault) => ({
+        component: fault.component,
+        faultType: fault.faultType,
+        confidence: fault.confidence,
+        description: fault.description,
+        recommendedActions: Array.isArray(fault.recommendedActions)
+          ? fault.recommendedActions
+          : [],
+      }))
+      detectedFaults.push(...nextFaults)
+      tx.set(ref, { detectedFaults }, { merge: true })
+    })
+  }
+
+  public async appendInspectionTranscript(inspectionId: string, entry: string): Promise<void> {
+    const trimmed = entry.trim()
+    if (!trimmed) {
+      return
+    }
+
+    const ref = this.db.collection('inspections').doc(inspectionId)
+    await this.db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref)
+      if (!snap.exists) {
+        throw new Error('Inspection not found')
+      }
+
+      const data = snap.data() as Record<string, unknown>
+      const currentTranscript = typeof data.transcript === 'string' ? data.transcript : ''
+      const transcript = currentTranscript ? `${currentTranscript}\n${trimmed}` : trimmed
+      tx.set(ref, { transcript }, { merge: true })
+    })
   }
 
   public async appendInspectionImage(inspectionId: string, imageUrl: string): Promise<void> {
@@ -311,9 +402,45 @@ export class FirestoreDataService {
       timestamp: this.deserializeDate(data.timestamp),
       status: data.status === 'completed' ? 'completed' : 'in_progress',
       images: Array.isArray(data.images) ? data.images.filter((v): v is string => typeof v === 'string') : [],
-      safetyFlags: Array.isArray(data.safetyFlags) ? (data.safetyFlags as Inspection['safetyFlags']) : [],
+      safetyFlags: Array.isArray(data.safetyFlags)
+        ? data.safetyFlags.map((item) => {
+            const entry = item as Record<string, unknown>
+            return {
+              type:
+                entry.type === 'missing_ppe' ||
+                entry.type === 'dangerous_proximity' ||
+                entry.type === 'leak' ||
+                entry.type === 'spark' ||
+                entry.type === 'exposed_wire' ||
+                entry.type === 'slippery_surface' ||
+                entry.type === 'open_flame'
+                  ? entry.type
+                  : 'missing_ppe',
+              severity:
+                entry.severity === 'critical' ||
+                entry.severity === 'high' ||
+                entry.severity === 'medium' ||
+                entry.severity === 'low'
+                  ? entry.severity
+                  : 'low',
+              description: typeof entry.description === 'string' ? entry.description : '',
+              timestamp: this.deserializeDate(entry.timestamp),
+            }
+          })
+        : [],
       detectedFaults: Array.isArray(data.detectedFaults)
-        ? (data.detectedFaults as Inspection['detectedFaults'])
+        ? data.detectedFaults.map((item) => {
+            const entry = item as Record<string, unknown>
+            return {
+              component: typeof entry.component === 'string' ? entry.component : 'unknown',
+              faultType: typeof entry.faultType === 'string' ? entry.faultType : 'unknown',
+              confidence: typeof entry.confidence === 'number' ? entry.confidence : 0,
+              description: typeof entry.description === 'string' ? entry.description : '',
+              recommendedActions: Array.isArray(entry.recommendedActions)
+                ? entry.recommendedActions.filter((v): v is string => typeof v === 'string')
+                : [],
+            }
+          })
         : [],
       recommendedActions: Array.isArray(data.recommendedActions)
         ? data.recommendedActions.filter((v): v is string => typeof v === 'string')
@@ -369,6 +496,48 @@ export class FirestoreDataService {
       transcript: typeof data.transcript === 'string' ? data.transcript : '',
       summary: typeof data.summary === 'string' ? data.summary : undefined,
     }
+  }
+
+  public async createSiteAsset(
+    input: Omit<SiteAsset, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<SiteAsset> {
+    const id = uuidv4()
+    const now = new Date()
+    const ref = this.db.collection('site_assets').doc(id)
+    await ref.set({
+      id,
+      ...input,
+      createdAt: Timestamp.fromDate(now),
+      updatedAt: Timestamp.fromDate(now),
+    })
+    return { id, ...input, createdAt: now, updatedAt: now }
+  }
+
+  public async listSiteAssets(siteId: string): Promise<SiteAsset[]> {
+    const snapshot = await this.db
+      .collection('site_assets')
+      .where('siteId', '==', siteId)
+      .orderBy('createdAt', 'desc')
+      .limit(100)
+      .get()
+    return snapshot.docs.map((doc) => {
+      const data = doc.data()
+      return {
+        id: doc.id,
+        siteId: String(data.siteId ?? ''),
+        name: String(data.name ?? ''),
+        assetType: String(data.assetType ?? ''),
+        serialNumber: data.serialNumber ? String(data.serialNumber) : undefined,
+        location: data.location ? String(data.location) : undefined,
+        notes: data.notes ? String(data.notes) : undefined,
+        createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : new Date(),
+        updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : new Date(),
+      }
+    })
+  }
+
+  public async deleteSiteAsset(assetId: string): Promise<void> {
+    await this.db.collection('site_assets').doc(assetId).delete()
   }
 
   private deserializeTechnician(data: Record<string, unknown>): Technician {

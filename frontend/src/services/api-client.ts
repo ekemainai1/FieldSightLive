@@ -13,21 +13,45 @@ interface RequestOptions {
   body?: unknown
 }
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+interface BlobRequestOptions {
+  method?: 'GET' | 'POST' | 'PATCH'
+}
+
+async function buildAuthHeaders(baseHeaders: Record<string, string> = {}): Promise<Record<string, string>> {
   const token = await authTokenProvider()
+  return {
+    ...baseHeaders,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
+async function readResponseError(response: Response): Promise<string> {
+  const payload = (await response.clone().json().catch(() => ({}))) as { error?: string }
+  if (payload.error) {
+    return payload.error
+  }
+
+  const text = await response.text().catch(() => '')
+  if (text.trim().length > 0) {
+    return text
+  }
+
+  return `Request failed: ${response.status}`
+}
+
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const headers = await buildAuthHeaders({
+    'Content-Type': 'application/json',
+  })
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: options.method || 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
 
   if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new Error(payload.error || `Request failed: ${response.status}`)
+    throw new Error(await readResponseError(response))
   }
 
   if (response.status === 204) {
@@ -35,6 +59,20 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   return (await response.json()) as T
+}
+
+export async function apiRequestBlob(path: string, options: BlobRequestOptions = {}): Promise<Blob> {
+  const headers = await buildAuthHeaders()
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: options.method || 'GET',
+    headers,
+  })
+
+  if (!response.ok) {
+    throw new Error(await readResponseError(response))
+  }
+
+  return response.blob()
 }
 
 export async function uploadFileToSignedUrl(

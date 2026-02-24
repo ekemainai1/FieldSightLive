@@ -15,9 +15,14 @@
 | Frontend | Next.js 16, TypeScript, WebRTC, TailwindCSS |
 | Backend | Node.js + TypeScript, Cloud Run |
 | AI Agent | Google ADK (Agent Developer Kit), Gemini Live API |
-| Database | Firestore |
-| Storage | Cloud Storage (GCS) |
+| Database | Firestore (prod) or PostgreSQL (dev) |
+| Storage | Cloud Storage GCS (prod) or MinIO (dev) |
 | Async Tasks | Cloud Functions |
+
+### Environment Provider Mapping
+
+- **Production:** Firestore (database) + Cloud Storage GCS buckets (object storage)
+- **Development/Local:** PostgreSQL (database) + MinIO (object storage)
 
 ---
 
@@ -338,9 +343,9 @@ FieldSightLive/
 - [x] Phase 1 complete: repository structure, frontend/backend setup, CI pipeline, lint/typecheck/test scripts
 - [x] Phase 2 complete: camera streaming, push-to-talk, websocket, transcript UI, snapshot capture, frontend tests
 - [x] Phase 3 mostly complete: websocket gateway, Gemini integration (Live + fallback), interrupt handling, rate limiting, logging, backend tests
-- [x] Phase 4 complete: Firestore CRUD, GCS signed upload flow, history APIs, integration tests
-- [x] Phase 5 mostly complete: report generation + persistence + PDF endpoint + frontend preview/download panel
-- [ ] Phase 6/6b partial: offline mode and workflow automation integrations still pending
+- [x] Phase 4 complete: Dual data layer (Firestore prod + PostgreSQL dev), dual storage (GCS prod + MinIO dev), CRUD, history APIs, integration tests
+- [x] Phase 5 complete: report generation + persistence + PDF endpoint + frontend preview/download panel
+- [x] Phase 6/6b mostly complete: workflow automation with voice intents + confirmation + webhook retry + MinIO/Postgres adapters
 - [ ] Phase 7 partial: load/security/perf profiling still pending
 - [ ] Phase 8 partial: production Cloud Run deployment and monitoring still pending
 
@@ -432,19 +437,18 @@ FieldSightLive/
 **Features Delivered:** #6, #9
 
 **Goals:**
-- [ ] Implement Firestore schema for inspections
-- [ ] Add Cloud Storage for images and snapshots
-- [ ] Create CRUD operations for technicians, sites, inspections
-- [ ] Implement real-time updates to frontend
-- [ ] Add security rules for database and storage
-- [ ] Implement technician history & asset tracking
-- [ ] Track fault patterns and frequently failing components
-- [ ] Write integration tests for data layer
+- [x] Implement dual data layer (Firestore prod + PostgreSQL dev)
+- [x] Add dual storage (GCS prod + MinIO dev)
+- [x] Create CRUD operations for technicians, sites, inspections
+- [x] Implement snapshot upload and attach flow
+- [x] Add workflow event persistence
+- [x] Implement technician history & asset tracking
+- [x] Write integration tests for data layer
 
 **Deliverables:**
-- Complete Firestore data model
-- Image upload/download functionality
-- Real-time inspection updates
+- Complete dual-provider data model (PostgreSQL + Firestore)
+- Image upload/download functionality via signed URLs
+- Dual storage (MinIO + GCS) with provider selection via env vars
 - Security rules verified
 
 ---
@@ -487,18 +491,23 @@ FieldSightLive/
 
 ### Phase 6b — Multi-Site Support & Workflow Automation (Week 4)
 
-**Features Delivered:** #10, #12
+**Features Delivered:** #12 (core implemented), #10 (partial)
 
 **Goals:**
 - [ ] Implement multi-site support for O&G, Power, Telecom, Manufacturing
 - [ ] Create site-specific configuration and asset management
-- [ ] Implement workflow automation (log issue, create ticket, notify supervisor)
+- [x] Implement workflow automation (log issue, create ticket, notify supervisor)
+- [x] Add webhook-based external workflow integration baseline (retry + idempotency)
+- [x] Add provider adapters for external workflow payloads (generic, Jira, ServiceNow)
+- [x] Voice-triggered workflow intents with confirmation (confirm/cancel)
+- [x] Workflow timeline in History panel and report exports
 - [ ] Integrate with external ticketing systems
 - [ ] Add ADK tools for automation actions
 
 **Deliverables:**
 - Industry-agnostic field support
 - Automated ticket creation and notifications
+- Voice confirmation workflow for external actions
 - ADK-powered workflow actions
 
 ---
@@ -545,9 +554,9 @@ FieldSightLive/
 | Frontend core functional | Week 2 | [x] |
 | Backend Gemini integration | Week 3 | [x] (partial: auth/OCR hardening pending) |
 | Data layer complete | Week 3 | [x] |
-| Reports generation | Week 4 | [x] (partial: Cloud Functions async pipeline pending) |
+| Reports generation | Week 4 | [x] (partial: production Cloud Functions deployment/ops hardening pending) |
 | Safety features | Week 4 | [ ] (partial implementation in app flow) |
-| Multi-site & workflow automation | Week 4 | [ ] |
+| Multi-site & workflow automation | Week 4 | [ ] (partial: workflow routes + voice intents/confirmation + live controls implemented; multi-site/external integrations pending) |
 | Testing complete | Week 5 | [ ] (quality gates + major tests done; load/security pending) |
 | Production deployment | Week 6 | [ ] |
 

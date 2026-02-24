@@ -1,5 +1,7 @@
 import type { WorkflowActionType } from '../types'
 
+const EXTERNAL_ACTIONS = new Set<WorkflowActionType>(['create_ticket', 'notify_supervisor'])
+
 const INTENT_PATTERNS: Array<{ action: WorkflowActionType; patterns: RegExp[] }> = [
   {
     action: 'create_ticket',
@@ -44,6 +46,27 @@ export function detectWorkflowIntent(transcript: string): WorkflowActionType | n
     if (intent.patterns.some((pattern) => pattern.test(text))) {
       return intent.action
     }
+  }
+
+  return null
+}
+
+export function requiresVoiceConfirmation(action: WorkflowActionType): boolean {
+  return EXTERNAL_ACTIONS.has(action)
+}
+
+export function detectWorkflowConfirmationDecision(transcript: string): 'confirm' | 'cancel' | null {
+  const text = transcript.trim()
+  if (!text) {
+    return null
+  }
+
+  if (/\b(confirm|yes|proceed|do it|go ahead)\b/i.test(text)) {
+    return 'confirm'
+  }
+
+  if (/\b(cancel|stop|never mind|abort|don't)\b/i.test(text)) {
+    return 'cancel'
   }
 
   return null

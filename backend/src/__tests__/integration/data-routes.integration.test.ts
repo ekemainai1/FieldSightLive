@@ -29,6 +29,24 @@ describeIfEmulator('Data routes integration (Firestore emulator)', () => {
       return Buffer.from('pdf-bytes')
     },
   }
+  const reportPipelineService = {
+    async enqueueReportGeneration(inspectionId: string) {
+      return {
+        jobId: `job_${inspectionId}`,
+        inspectionId,
+        status: 'queued' as const,
+        provider: 'local' as const,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+    },
+    getReportJob() {
+      return null
+    },
+    getLatestReportJobForInspection() {
+      return null
+    },
+  }
   const ocrService = {
     async extractFromImageUrl(imageUrl: string) {
       return {
@@ -43,7 +61,13 @@ describeIfEmulator('Data routes integration (Firestore emulator)', () => {
     },
   }
   const workflowAutomationService = {
-    async runAction(input: { action: string; note?: string }) {
+    async runAction(input: {
+      inspectionId: string
+      action: string
+      note?: string
+      metadata?: Record<string, unknown>
+      idempotencyKey?: string
+    }) {
       return {
         status: 'completed' as const,
         resultMessage: input.note
@@ -61,6 +85,7 @@ describeIfEmulator('Data routes integration (Firestore emulator)', () => {
     createDataRouter(
       dataService,
       storageService,
+      reportPipelineService,
       reportPdfService,
       ocrService,
       workflowAutomationService,
@@ -133,7 +158,12 @@ describeIfEmulator('Data routes integration (Firestore emulator)', () => {
     expect(getRes.status).toBe(200)
     expect(getRes.body.images).toContain(signedRes.body.publicUrl)
 
-    const reportCreateRes = await request(app).post(`/api/v1/inspections/${inspectionId}/report`)
+    const reportJobRes = await request(app).post(`/api/v1/inspections/${inspectionId}/report`)
+    expect(reportJobRes.status).toBe(202)
+    expect(reportJobRes.body.inspectionId).toBe(inspectionId)
+    expect(reportJobRes.body.status).toBe('queued')
+
+    const reportCreateRes = await request(app).post(`/api/v1/inspections/${inspectionId}/report?mode=sync`)
     expect(reportCreateRes.status).toBe(201)
     expect(reportCreateRes.body.inspectionId).toBe(inspectionId)
 
@@ -170,7 +200,7 @@ describeIfEmulator('Data routes integration (Firestore emulator)', () => {
     expect(Array.isArray(inspectionAfterWorkflow.body.workflowEvents)).toBe(true)
     expect(inspectionAfterWorkflow.body.workflowEvents.length).toBeGreaterThan(0)
 
-    const reportWithWorkflowRes = await request(app).post(`/api/v1/inspections/${inspectionId}/report`)
+    const reportWithWorkflowRes = await request(app).post(`/api/v1/inspections/${inspectionId}/report?mode=sync`)
     expect(reportWithWorkflowRes.status).toBe(201)
     expect(Array.isArray(reportWithWorkflowRes.body.workflowSummary)).toBe(true)
     expect(reportWithWorkflowRes.body.workflowSummary.length).toBeGreaterThan(0)
