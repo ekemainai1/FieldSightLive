@@ -233,3 +233,6 @@ coverage/
 *.swp
 *.swo
 
+# Allow frontend lib folder (lib/ would catch this)
+!frontend/src/lib
+
