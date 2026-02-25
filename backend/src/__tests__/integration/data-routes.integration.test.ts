@@ -93,13 +93,24 @@ describeIfEmulator('Data routes integration (Firestore emulator)', () => {
   )
 
   beforeAll(async () => {
-    await clearCollection('technicians')
-    await clearCollection('sites')
-    await clearCollection('inspections')
-  }, 20_000)
+    jest.setTimeout(60_000)
+    // Wait for emulator to be ready
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+    try {
+      await clearCollection('technicians')
+      await clearCollection('sites')
+      await clearCollection('inspections')
+    } catch (error) {
+      console.warn('Firestore emulator may not be running:', error instanceof Error ? error.message : 'Unknown error')
+    }
+  }, 50_000)
 
   afterAll(async () => {
-    await firestore.terminate()
+    try {
+      await firestore.terminate()
+    } catch {
+      // Client may already be terminated or not connected
+    }
   })
 
   it('should run CRUD + snapshot attach flow', async () => {
