@@ -17,13 +17,9 @@ import { ReportPdfService } from './services/report-pdf.service'
 import { ReportPipelineService } from './services/report-pipeline.service'
 import { StorageService } from './services/storage.service'
 import { WorkflowAutomationService } from './services/workflow-automation.service'
+import { AdkAgentService } from './services/adk-agent.service'
 import { createDataRouter } from './routes/data.routes'
 import { incomingMessageSchema, type IncomingMessage } from './utils/ws-validation'
-import {
-  detectWorkflowConfirmationDecision,
-  detectWorkflowIntent,
-  requiresVoiceConfirmation,
-} from './utils/workflow-intents'
 import { SlidingWindowRateLimiter } from './utils/rate-limiter'
 import type {
   AudioMessage,
@@ -76,6 +72,7 @@ class App {
   private reportPipelineService: ReportPipelineService
   private storageService: StorageService | MinioStorageService
   private workflowAutomationService = new WorkflowAutomationService()
+  private adkAgentService: AdkAgentService
   private rateLimiter: SlidingWindowRateLimiter
 
   private readonly RATE_WINDOW_MS = 10_000
@@ -91,6 +88,11 @@ class App {
     this.dataService = this.createDataService()
     this.reportPipelineService = new ReportPipelineService(this.dataService, logger)
     this.storageService = this.createStorageService()
+    this.adkAgentService = new AdkAgentService(
+      this.dataService,
+      this.workflowAutomationService,
+      this.ocrService,
+    )
     this.rateLimiter = new SlidingWindowRateLimiter(this.RATE_WINDOW_MS, this.RATE_MAX_MESSAGES)
 
     this.middleware()
@@ -142,14 +144,35 @@ class App {
   }
 
   private middleware(): void {
-    this.app.use(helmet())
-    this.app.use(cors({
-      origin: '*',
-      methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+    this.app.use(helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", "data:", "https:"],
+          connectSrc: ["'self'", "ws:", "wss:"],
+        },
+      },
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      },
     }))
+    
+    const corsOrigin = process.env.CORS_ORIGIN?.trim() || '*'
+    this.app.use(cors({
+      origin: corsOrigin === '*' ? true : corsOrigin.split(',').map(o => o.trim()),
+      methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+      exposedHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining'],
+      credentials: true,
+      maxAge: 86400,
+    }))
+    
     this.app.use(express.json({ limit: '10mb' }))
-    this.app.use(express.urlencoded({ extended: true }))
+    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }))
   }
 
   private routes(): void {
@@ -232,6 +255,7 @@ class App {
         this.reportPdfService,
         this.ocrService,
         this.workflowAutomationService,
+        this.adkAgentService,
       ),
     )
 
@@ -590,86 +614,53 @@ class App {
         return
       }
 
-      let pending = this.pendingVoiceConfirmations.get(clientId)
-      if (pending && pending.inspectionId !== inspectionId) {
-        this.pendingVoiceConfirmations.delete(clientId)
-        pending = undefined
+      const pending = this.pendingVoiceConfirmations.get(clientId)
+
+      const result = await this.adkAgentService.processVoiceTranscript(
+        transcript,
+        inspectionId,
+        pending?.action,
+      )
+
+      if (!result.result) {
+        return
       }
 
-      if (pending && Date.now() - pending.createdAt > this.VOICE_CONFIRM_TTL_MS) {
-        this.pendingVoiceConfirmations.delete(clientId)
-        this.sendToClient(clientId, {
-          type: 'workflow_confirmation',
-          status: 'expired',
-          action: pending.action,
-        })
-        this.sendToClient(clientId, {
-          type: 'gemini_response',
-          text: `Pending ${pending.action} confirmation expired. Say the command again.`,
-        })
-        pending = undefined
-      }
-
-      const confirmationDecision = detectWorkflowConfirmationDecision(transcript)
-      if (pending && pending.inspectionId === inspectionId) {
-        if (confirmationDecision === 'confirm') {
+      if (result.requiresConfirmation && result.action) {
+        if (result.confirmed === true) {
           this.pendingVoiceConfirmations.delete(clientId)
           this.sendToClient(clientId, {
             type: 'workflow_confirmation',
             status: 'confirmed',
-            action: pending.action,
+            action: result.action,
           })
-          await this.executeVoiceWorkflowAction(
-            clientId,
-            inspectionId,
-            pending.action,
-            pending.transcript,
-            true,
-          )
-          return
-        }
-
-        if (confirmationDecision === 'cancel') {
+        } else if (result.confirmed === false) {
           this.pendingVoiceConfirmations.delete(clientId)
           this.sendToClient(clientId, {
             type: 'workflow_confirmation',
             status: 'cancelled',
-            action: pending.action,
+            action: result.action,
+          })
+        } else {
+          this.pendingVoiceConfirmations.set(clientId, {
+            inspectionId,
+            action: result.action,
+            transcript,
+            createdAt: Date.now(),
           })
           this.sendToClient(clientId, {
-            type: 'gemini_response',
-            text: `Cancelled pending ${pending.action} action.`,
+            type: 'workflow_confirmation',
+            status: 'pending',
+            action: result.action,
+            expiresAt: Date.now() + this.VOICE_CONFIRM_TTL_MS,
           })
-          return
         }
       }
 
-      const action = detectWorkflowIntent(transcript)
-      if (!action) {
-        return
-      }
-
-      if (requiresVoiceConfirmation(action)) {
-        this.pendingVoiceConfirmations.set(clientId, {
-          inspectionId,
-          action,
-          transcript,
-          createdAt: Date.now(),
-        })
-        this.sendToClient(clientId, {
-          type: 'workflow_confirmation',
-          status: 'pending',
-          action,
-          expiresAt: Date.now() + this.VOICE_CONFIRM_TTL_MS,
-        })
-        this.sendToClient(clientId, {
-          type: 'gemini_response',
-          text: `I heard ${action}. Say confirm to proceed or cancel to abort.`,
-        })
-        return
-      }
-
-      await this.executeVoiceWorkflowAction(clientId, inspectionId, action, transcript, false)
+      this.sendToClient(clientId, {
+        type: 'gemini_response',
+        text: result.result.message,
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       this.sendToClient(clientId, {

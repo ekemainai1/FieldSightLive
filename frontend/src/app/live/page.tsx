@@ -9,9 +9,27 @@ import { useWebRTC } from '@/hooks/useWebRTC'
 import { useAudioCapture } from '@/hooks/useAudioCapture'
 import { useInspectionSession } from '@/hooks/useInspectionSession'
 import { getWebSocketService, WebSocketMessage } from '@/services/websocket'
-import type { WorkflowActionType } from '@/services/inspection-service'
 import { inspectionService } from '@/services/inspection-service'
 import { useAppStore } from '@/lib/store'
+import { 
+  Camera, 
+  Mic, 
+  Wifi, 
+  WifiOff, 
+  Settings,
+  Zap,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  ArrowRight,
+  MessageSquare,
+  FileText,
+  History,
+  ScanText,
+  Sparkles,
+  User,
+  MapPin
+} from 'lucide-react'
 
 export default function LivePage() {
   const sessionId = useAppStore((state) => state.sessionId)
@@ -38,18 +56,13 @@ export default function LivePage() {
   const [confirmationNow, setConfirmationNow] = useState<number>(Date.now())
 
   useEffect(() => {
-    if (!pendingVoiceConfirmation) {
-      return
-    }
-
+    if (!pendingVoiceConfirmation) return
     const timer = setInterval(() => setConfirmationNow(Date.now()), 1000)
     return () => clearInterval(timer)
   }, [pendingVoiceConfirmation])
 
   useEffect(() => {
-    if (!sessionId) {
-      setSessionId(`session_${Date.now()}`)
-    }
+    if (!sessionId) setSessionId(`session_${Date.now()}`)
   }, [sessionId, setSessionId])
 
   useEffect(() => {
@@ -58,9 +71,7 @@ export default function LivePage() {
         case 'connected':
           setConnected(true)
           addMessage({ type: 'system', text: 'Connected to FieldSight Live' })
-          if (inspection.inspectionId) {
-            wsService.sendInspectionContext(inspection.inspectionId)
-          }
+          if (inspection.inspectionId) wsService.sendInspectionContext(inspection.inspectionId)
           break
         case 'live_transcript':
           if (typeof message.text === 'string' && message.text.trim().length > 0) {
@@ -70,30 +81,20 @@ export default function LivePage() {
         case 'workflow_confirmation':
           if (message.status === 'pending') {
             const action = typeof message.action === 'string' ? message.action : 'workflow_action'
-            const expiresAt =
-              typeof message.expiresAt === 'number' ? message.expiresAt : Date.now() + 30000
+            const expiresAt = typeof message.expiresAt === 'number' ? message.expiresAt : Date.now() + 30000
             setPendingVoiceConfirmation({ action, expiresAt })
-            addMessage({
-              type: 'system',
-              text: `WF_CONFIRM|pending|${action}|Awaiting voice confirmation`,
-            })
+            addMessage({ type: 'system', text: `WF_CONFIRM|pending|${action}|Awaiting voice confirmation` })
           } else {
             setPendingVoiceConfirmation(null)
-            const status =
-              typeof message.status === 'string' ? message.status : 'expired'
-            const action = typeof message.action === 'string' ? message.action : 'workflow_action'
-            addMessage({
-              type: 'system',
-              text: `WF_CONFIRM|${status}|${action}|Voice confirmation ${status}`,
-            })
+            addMessage({ type: 'system', text: `WF_CONFIRM|${message.status || 'expired'}|${message.action || 'workflow_action'}|Voice confirmation ${message.status || 'expired'}` })
           }
           break
         case 'gemini_response':
           addMessage({ type: 'agent', text: (message.text as string) || '' })
-          if (message.safetyFlags && Array.isArray(message.safetyFlags)) {
+          if (Array.isArray(message.safetyFlags) && message.safetyFlags.length) {
             message.safetyFlags.forEach((flag) => addSafetyFlag(flag as Parameters<typeof addSafetyFlag>[0]))
           }
-          if (message.detectedFaults && Array.isArray(message.detectedFaults)) {
+          if (Array.isArray(message.detectedFaults) && message.detectedFaults.length) {
             message.detectedFaults.forEach((fault) => addDetectedFault(fault as Parameters<typeof addDetectedFault>[0]))
           }
           break
@@ -107,20 +108,10 @@ export default function LivePage() {
           break
       }
     })
-
     return () => unsubscribe()
-  }, [
-    wsService,
-    setConnected,
-    addMessage,
-    addSafetyFlag,
-    addDetectedFault,
-    inspection.inspectionId,
-  ])
+  }, [wsService, setConnected, addMessage, addSafetyFlag, addDetectedFault, inspection.inspectionId])
 
-  const confirmationSecondsLeft = pendingVoiceConfirmation
-    ? Math.max(0, Math.ceil((pendingVoiceConfirmation.expiresAt - confirmationNow) / 1000))
-    : 0
+  const confirmationSecondsLeft = pendingVoiceConfirmation ? Math.max(0, Math.ceil((pendingVoiceConfirmation.expiresAt - confirmationNow) / 1000)) : 0
 
   useEffect(() => {
     if (pendingVoiceConfirmation && confirmationSecondsLeft === 0) {
@@ -139,24 +130,14 @@ export default function LivePage() {
 
   const handleStartRecording = useCallback(async () => {
     if (inspection.isOffline) {
-      addMessage({
-        type: 'system',
-        text: 'Offline mode: voice streaming is unavailable. Capture snapshots and sync later.',
-      })
+      addMessage({ type: 'system', text: 'Offline mode: voice streaming is unavailable.' })
       return
     }
-
     if (!wsService.isConnected) {
-      addMessage({
-        type: 'system',
-        text: 'WebSocket not connected. Make sure camera is streaming first.',
-      })
+      addMessage({ type: 'system', text: 'WebSocket not connected. Start camera first.' })
       return
     }
-
-    await startRecording((chunk) => {
-      wsService.sendAudio(chunk)
-    })
+    await startRecording((chunk) => wsService.sendAudio(chunk))
   }, [addMessage, inspection.isOffline, startRecording, wsService])
 
   const handleStopRecording = useCallback(async () => {
@@ -168,64 +149,40 @@ export default function LivePage() {
   const handleCaptureSnapshot = useCallback(() => {
     const frame = captureFrame()
     if (frame) {
-      if (!inspection.isOffline) {
-        wsService.sendVideoFrame(frame)
-      }
+      if (!inspection.isOffline) wsService.sendVideoFrame(frame)
       addMessage({ type: 'system', text: 'Snapshot captured' })
       void inspection.uploadSnapshot(frame)
         .then((imageUrl) => {
           if (imageUrl.startsWith('offline://')) {
-            addMessage({
-              type: 'system',
-              text: 'Snapshot queued for sync. It will upload automatically when network is back.',
-            })
-            addMessage({
-              type: 'system',
-              text: 'Offline safety note: live AI detections pause while disconnected.',
-            })
+            addMessage({ type: 'system', text: 'Snapshot queued for sync.' })
             return
           }
-
           setLastSnapshotUrl(imageUrl)
-          addMessage({ type: 'system', text: `Snapshot uploaded: ${imageUrl}` })
+          addMessage({ type: 'system', text: `Snapshot uploaded` })
         })
-        .catch((error) => {
-          const message = error instanceof Error ? error.message : 'Snapshot upload failed'
-          addMessage({ type: 'system', text: `Snapshot upload failed: ${message}` })
-        })
+        .catch((error) => addMessage({ type: 'system', text: `Snapshot upload failed: ${error instanceof Error ? error.message : 'Unknown error'}` }))
     }
   }, [addMessage, captureFrame, inspection, wsService])
 
   const handleRunOcr = useCallback(() => {
     if (inspection.isOffline) {
-      addMessage({ type: 'system', text: 'Offline mode: OCR requires network connectivity.' })
+      addMessage({ type: 'system', text: 'Offline mode: OCR requires network.' })
       return
     }
-
     if (!inspection.inspectionId) {
-      addMessage({ type: 'system', text: 'Start an inspection first before running OCR.' })
+      addMessage({ type: 'system', text: 'Start inspection first.' })
       return
     }
-
     void inspectionService.runOcr(inspection.inspectionId, lastSnapshotUrl || undefined)
       .then((ocr) => {
         const summary = [
           ocr.serialNumbers.length > 0 ? `Serial: ${ocr.serialNumbers.join(', ')}` : null,
           ocr.partCodes.length > 0 ? `Part codes: ${ocr.partCodes.join(', ')}` : null,
           ocr.meterReadings.length > 0 ? `Readings: ${ocr.meterReadings.join(', ')}` : null,
-        ]
-          .filter(Boolean)
-          .join(' | ')
-
-        addMessage({
-          type: 'system',
-          text: summary || `OCR completed (${Math.round(ocr.confidence * 100)}% confidence).`,
-        })
+        ].filter(Boolean).join(' | ')
+        addMessage({ type: 'system', text: summary || `OCR completed (${Math.round(ocr.confidence * 100)}% confidence).` })
       })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : 'OCR failed'
-        addMessage({ type: 'system', text: `OCR failed: ${message}` })
-      })
+      .catch((error) => addMessage({ type: 'system', text: `OCR failed: ${error instanceof Error ? error.message : 'Unknown error'}` }))
   }, [addMessage, inspection.inspectionId, inspection.isOffline, lastSnapshotUrl])
 
   const handleInterrupt = useCallback(() => {
@@ -233,49 +190,30 @@ export default function LivePage() {
     addMessage({ type: 'system', text: 'Interrupted' })
   }, [wsService, addMessage])
 
-  const handleWorkflowAction = useCallback(
-    (action: WorkflowActionType) => {
-      if (!inspection.inspectionId) {
-        addMessage({ type: 'system', text: 'Start an inspection first before triggering workflow actions.' })
-        return
-      }
-
-      const note = `Triggered from live console at ${new Date().toLocaleTimeString()}`
-      void inspectionService
-        .runWorkflowAction(inspection.inspectionId, action, note)
-        .then((event) => {
-          addMessage({
-            type: 'system',
-            text: `${action}: ${event.resultMessage}`,
-          })
-        })
-        .catch((error) => {
-          const message = error instanceof Error ? error.message : 'Workflow action failed'
-          addMessage({ type: 'system', text: `${action} failed: ${message}` })
-        })
-    },
-    [addMessage, inspection.inspectionId],
-  )
+  const handleWorkflowAction = useCallback((action: 'log_issue' | 'create_ticket' | 'notify_supervisor' | 'add_to_history') => {
+    if (!inspection.inspectionId) {
+      addMessage({ type: 'system', text: 'Start inspection first.' })
+      return
+    }
+    const note = `Triggered from live console at ${new Date().toLocaleTimeString()}`
+    void inspectionService.runWorkflowAction(inspection.inspectionId, action, note)
+      .then((event) => addMessage({ type: 'system', text: `${action}: ${event.resultMessage}` }))
+      .catch((error) => addMessage({ type: 'system', text: `${action} failed: ${error instanceof Error ? error.message : 'Unknown error'}` }))
+  }, [addMessage, inspection.inspectionId])
 
   const handleStartCamera = useCallback(async () => {
     await startStream()
-
     if (!technicianId || !siteId) {
-      addMessage({
-        type: 'system',
-        text: 'Select technician and site in Setup before starting an inspection.',
-      })
+      addMessage({ type: 'system', text: 'Select technician and site in Setup first.' })
       return
     }
-
     if (!inspection.inspectionId) {
       try {
         const inspectionId = await inspection.startInspection({ technicianId, siteId })
         wsService.sendInspectionContext(inspectionId)
         addMessage({ type: 'system', text: `Inspection started: ${inspectionId}` })
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to start inspection'
-        addMessage({ type: 'system', text: `Inspection start failed: ${message}` })
+        addMessage({ type: 'system', text: `Inspection failed: ${error instanceof Error ? error.message : 'Unknown error'}` })
       }
     }
   }, [addMessage, inspection, siteId, startStream, technicianId])
@@ -283,104 +221,146 @@ export default function LivePage() {
   const handleStopCamera = useCallback(() => {
     stopStream()
     const hadInspection = Boolean(inspection.inspectionId)
-
     void inspection.completeInspection('Inspection closed from camera stop.')
       .then((report) => {
-        if (!hadInspection && !report) {
-          return
-        }
-        addMessage({
-          type: 'system',
-          text: report
-            ? `Inspection completed. Report ready: ${report.inspectionId}`
-            : 'Inspection queued for completion. It will sync when network is back.',
-        })
+        if (!hadInspection && !report) return
+        addMessage({ type: 'system', text: report ? `Inspection completed. Report: ${report.inspectionId}` : 'Inspection queued for completion.' })
       })
-      .catch(() => {
-        // ignore when no inspection exists
-      })
+      .catch(() => {})
   }, [addMessage, inspection, stopStream])
 
   const handleSyncOfflineQueue = useCallback(() => {
     void inspection.syncPendingOperations()
-      .then(() => {
-        addMessage({ type: 'system', text: 'Offline queue sync completed.' })
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : 'Offline sync failed'
-        addMessage({ type: 'system', text: `Offline sync failed: ${message}` })
-      })
+      .then(() => addMessage({ type: 'system', text: 'Offline queue sync completed.' }))
+      .catch((error) => addMessage({ type: 'system', text: `Offline sync failed: ${error instanceof Error ? error.message : 'Unknown error'}` }))
   }, [addMessage, inspection])
 
   return (
-    <div className="p-6 space-y-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Live Assist</h1>
-          <p className="text-muted-foreground">Real-time camera + voice troubleshooting session</p>
+    <div className="min-h-screen p-4 lg:p-6 xl:p-8 space-y-4 lg:space-y-6">
+      {/* Header */}
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-4 pl-12 sm:pl-0">
+          <div className="w-12 h-12 lg:w-14 lg:h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-600/25">
+            <Camera className="w-6 h-6 lg:w-7 lg:h-7 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl lg:text-3xl font-display font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+              Live Assist
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2">
+              <Zap className="w-3.5 h-3.5 text-amber-500" />
+              Real-time AI-powered troubleshooting
+            </p>
+          </div>
         </div>
-        <Link href="/setup" className="text-sm px-3 py-2 rounded bg-secondary hover:bg-secondary/80">
-          Go to Setup
+        <Link href="/setup" className="btn-secondary text-sm">
+          <Settings className="w-4 h-4" />
+          <span className="hidden sm:inline">Setup</span>
         </Link>
       </header>
 
-      <div className="rounded border p-3 text-sm">
-        <span className="font-medium">Current selection:</span>{' '}
-        {technicianId && siteId ? (
-          <span className="text-muted-foreground">Technician `{technicianId}` at Site `{siteId}`</span>
+      {/* Status Bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+        {/* Connection Status */}
+        <div className="card-elevated p-4 flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${inspection.isOffline ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-emerald-100 dark:bg-emerald-900/30'}`}>
+            {inspection.isOffline ? <WifiOff className="w-5 h-5 text-amber-600 dark:text-amber-400" /> : <Wifi className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />}
+          </div>
+          <div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Status</p>
+            <p className={`font-semibold text-sm ${inspection.isOffline ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+              {inspection.isOffline ? 'Offline Mode' : 'Connected'}
+            </p>
+          </div>
+        </div>
+
+        {/* Current Session */}
+        <div className="card-elevated p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+            <User className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-slate-500 dark:text-slate-400">Technician</p>
+            <p className="font-semibold text-sm truncate">{technicianId || 'Not set'}</p>
+          </div>
+        </div>
+
+        {/* Site */}
+        <div className="card-elevated p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+            <MapPin className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-slate-500 dark:text-slate-400">Site</p>
+            <p className="font-semibold text-sm truncate">{siteId || 'Not set'}</p>
+          </div>
+        </div>
+
+        {/* Inspection */}
+        <div className="card-elevated p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
+            <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-slate-500 dark:text-slate-400">Inspection ID</p>
+            <p className="font-semibold text-sm truncate font-mono">{inspection.inspectionId ? inspection.inspectionId.slice(0, 12) + '...' : 'Not started'}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Voice Commands */}
+      <div className="card-elevated p-4 lg:p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <h2 className="font-semibold">Voice Commands</h2>
+          </div>
+          <Link href="/agent" className="btn-ghost text-sm text-blue-600 dark:text-blue-400 flex items-center gap-1">
+            <Sparkles className="w-4 h-4" />
+            Try AI Assistant
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+        
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+          {[
+            { cmd: '"Create ticket"', action: 'create_ticket' },
+            { cmd: '"Notify supervisor"', action: 'notify_supervisor' },
+            { cmd: '"Log issue"', action: 'log_issue' },
+            { cmd: '"Add to history"', action: 'add_to_history' },
+          ].map((item) => (
+            <button
+              key={item.action}
+              onClick={() => handleWorkflowAction(item.action as 'log_issue' | 'create_ticket' | 'notify_supervisor' | 'add_to_history')}
+              className="text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-all text-left"
+            >
+              {item.cmd}
+            </button>
+          ))}
+        </div>
+
+        {pendingVoiceConfirmation ? (
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+            <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                Awaiting confirmation: <span className="font-bold">{pendingVoiceConfirmation.action}</span>
+              </p>
+              <p className="text-xs text-amber-600 dark:text-amber-400">Say "confirm" or "cancel"</p>
+            </div>
+            <span className="text-2xl font-bold text-amber-600 dark:text-amber-400">{confirmationSecondsLeft}</span>
+          </div>
         ) : (
-          <span className="text-destructive">Not configured</span>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Say these commands during push-to-talk. External actions require confirmation.
+          </p>
         )}
       </div>
 
-      <div className="rounded border p-3 text-sm flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <span className="font-medium">Connectivity:</span>{' '}
-          {inspection.isOffline ? (
-            <span className="text-amber-600">Offline mode active</span>
-          ) : (
-            <span className="text-emerald-600">Online</span>
-          )}
-          <span className="text-muted-foreground">
-            {` | Pending sync items: ${inspection.pendingSyncCount}`}
-          </span>
-        </div>
-        {!inspection.isOffline && inspection.pendingSyncCount > 0 ? (
-          <button
-            className="px-3 py-2 rounded bg-secondary hover:bg-secondary/80 text-xs"
-            onClick={handleSyncOfflineQueue}
-            disabled={inspection.isSyncing}
-          >
-            {inspection.isSyncing ? 'Syncing...' : 'Sync offline queue'}
-          </button>
-        ) : null}
-      </div>
-
-      <div className="rounded border bg-card p-4 space-y-2">
-        <p className="text-sm font-semibold">Voice Commands</p>
-        <p className="text-xs text-muted-foreground">
-          Say these during push-to-talk to trigger workflow automation:
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-          <div className="rounded border p-2">"Create ticket"</div>
-          <div className="rounded border p-2">"Notify my supervisor"</div>
-          <div className="rounded border p-2">"Log this issue"</div>
-          <div className="rounded border p-2">"Add this to history"</div>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          For external actions, the system asks for confirmation. Say "confirm" to proceed or
-          "cancel" to abort.
-        </p>
-        {pendingVoiceConfirmation ? (
-          <div className="rounded border border-amber-500/40 bg-amber-100/50 p-2 text-xs">
-            Pending confirmation: <span className="font-semibold">{pendingVoiceConfirmation.action}</span>{' '}
-            ({confirmationSecondsLeft}s)
-          </div>
-        ) : null}
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <div className="space-y-4">
+      {/* Main Content Grid */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
+        {/* Video & Controls */}
+        <div className="space-y-4 lg:space-y-5">
           <VideoPlayer
             ref={videoRef}
             stream={stream}
@@ -388,6 +368,7 @@ export default function LivePage() {
             isLoading={webRTCState.isLoading}
             error={webRTCState.error}
           />
+          
           <Controls
             isStreaming={webRTCState.isStreaming}
             isRecording={audioState.isRecording}
@@ -399,43 +380,31 @@ export default function LivePage() {
             onCaptureSnapshot={handleCaptureSnapshot}
             onInterrupt={handleInterrupt}
           />
-          <button
-            className="px-3 py-2 rounded bg-secondary hover:bg-secondary/80 text-sm"
-            onClick={handleRunOcr}
-          >
-            Run OCR on Latest Snapshot
-          </button>
-          <div className="rounded border p-3 space-y-2">
-            <p className="text-xs font-semibold">Workflow automation</p>
-            <div className="grid grid-cols-2 gap-2">
+
+          {/* Quick Actions */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={handleRunOcr}
+              disabled={!inspection.inspectionId}
+              className="btn-secondary text-sm justify-center"
+            >
+              <ScanText className="w-4 h-4" />
+              Run OCR
+            </button>
+            {!inspection.isOffline && inspection.pendingSyncCount > 0 && (
               <button
-                className="px-2 py-2 rounded bg-primary text-primary-foreground text-xs"
-                onClick={() => handleWorkflowAction('log_issue')}
+                onClick={handleSyncOfflineQueue}
+                disabled={inspection.isSyncing}
+                className="btn-secondary text-sm justify-center"
               >
-                Log Issue
+                <History className="w-4 h-4" />
+                {inspection.isSyncing ? 'Syncing...' : `Sync (${inspection.pendingSyncCount})`}
               </button>
-              <button
-                className="px-2 py-2 rounded bg-primary text-primary-foreground text-xs"
-                onClick={() => handleWorkflowAction('create_ticket')}
-              >
-                Create Ticket
-              </button>
-              <button
-                className="px-2 py-2 rounded bg-primary text-primary-foreground text-xs"
-                onClick={() => handleWorkflowAction('notify_supervisor')}
-              >
-                Notify Supervisor
-              </button>
-              <button
-                className="px-2 py-2 rounded bg-primary text-primary-foreground text-xs"
-                onClick={() => handleWorkflowAction('add_to_history')}
-              >
-                Add to History
-              </button>
-            </div>
+            )}
           </div>
         </div>
 
+        {/* Transcript */}
         <Transcript
           messages={messages}
           safetyFlags={safetyFlags}

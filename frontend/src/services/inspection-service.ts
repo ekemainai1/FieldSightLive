@@ -163,6 +163,23 @@ export class InspectionService {
     })
   }
 
+  public async executeAgentAction(
+    message: string,
+    history?: { role: string; content: string }[],
+  ): Promise<{ success: boolean; message: string; toolName?: string; data?: unknown }> {
+    return apiRequest<{ success: boolean; message: string; toolName?: string; data?: unknown }>(
+      '/api/v1/agent/execute',
+      {
+        method: 'POST',
+        body: { message, history },
+      },
+    )
+  }
+
+  public async getAgentTools(): Promise<{ functions: unknown[]; configured: boolean }> {
+    return apiRequest<{ functions: unknown[]; configured: boolean }>('/api/v1/agent/tools')
+  }
+
   private dataUrlToBlob(dataUrl: string): Blob {
     const [meta, data] = dataUrl.split(',')
     if (!meta || !data) {

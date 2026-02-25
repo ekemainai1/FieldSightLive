@@ -21,11 +21,27 @@ export class SlidingWindowRateLimiter {
     return true
   }
 
+  public getRemaining(clientId: string): number {
+    const current = this.buckets.get(clientId)
+    if (!current || Date.now() - current.windowStart > this.windowMs) {
+      return this.maxMessages
+    }
+    return Math.max(0, this.maxMessages - current.count)
+  }
+
   public clear(clientId: string): void {
     this.buckets.delete(clientId)
   }
 
   public size(): number {
     return this.buckets.size
+  }
+
+  public getLimit(): number {
+    return this.maxMessages
+  }
+
+  public getWindowMs(): number {
+    return this.windowMs
   }
 }

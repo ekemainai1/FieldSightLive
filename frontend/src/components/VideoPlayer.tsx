@@ -1,6 +1,7 @@
 'use client'
 
 import { forwardRef, useEffect, useState } from 'react'
+import { Camera, AlertCircle, Loader2 } from 'lucide-react'
 
 interface VideoPlayerProps {
   stream: MediaStream | null
@@ -25,31 +26,19 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
 
       video.srcObject = stream
       if (stream) {
-        void video.play().catch(() => {
-          // no-op: browser may block autoplay until gesture, controls still allow retry
-        })
+        void video.play().catch(() => {})
       }
     }, [mounted, ref, stream])
 
     if (!mounted) {
       return (
-        <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-            <div className="flex flex-col items-center gap-2 text-center">
-              <svg
-                className="w-16 h-16 text-white/50"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                />
-              </svg>
-              <p className="text-white/70">Loading...</p>
+        <div className="relative w-full aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-elevated">
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center">
+                <Camera className="w-8 h-8 text-slate-500" />
+              </div>
+              <p className="text-slate-400 text-sm">Loading camera...</p>
             </div>
           </div>
         </div>
@@ -57,55 +46,41 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
     }
 
     return (
-      <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
+      <div className="relative w-full aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-elevated group">
+        {/* Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none z-10" />
+
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-            <div className="flex flex-col items-center gap-2">
-              <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-              <p className="text-white text-sm">Starting camera...</p>
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm z-20">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-blue-600/20 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+              </div>
+              <p className="text-white text-sm font-medium">Starting camera...</p>
             </div>
           </div>
         )}
 
         {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-            <div className="flex flex-col items-center gap-2 text-center px-4">
-              <svg
-                className="w-12 h-12 text-destructive"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-              <p className="text-destructive font-medium">{error}</p>
-              <p className="text-white/70 text-sm">Please check camera permissions</p>
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 backdrop-blur-sm z-20">
+            <div className="flex flex-col items-center gap-3 text-center px-4 max-w-sm">
+              <div className="w-14 h-14 rounded-2xl bg-red-500/20 flex items-center justify-center">
+                <AlertCircle className="w-7 h-7 text-red-500" />
+              </div>
+              <p className="text-red-400 font-semibold">{error}</p>
+              <p className="text-slate-400 text-sm">Please check camera permissions</p>
             </div>
           </div>
         )}
 
         {!isStreaming && !isLoading && !error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-            <div className="flex flex-col items-center gap-2 text-center">
-              <svg
-                className="w-16 h-16 text-white/50"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                />
-              </svg>
-              <p className="text-white/70">Click &quot;Start Camera&quot; to begin</p>
+          <div className="absolute inset-0 flex items-center justify-center z-20">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <div className="w-20 h-20 rounded-2xl bg-white/10 backdrop-blur-sm flex items-center justify-center">
+                <Camera className="w-10 h-10 text-white/60" />
+              </div>
+              <p className="text-white/70 font-medium">Click &quot;Start Camera&quot; to begin</p>
+              <p className="text-white/40 text-sm">Real-time AI analysis will start automatically</p>
             </div>
           </div>
         )}
@@ -119,17 +94,22 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
           style={{ display: isStreaming ? 'block' : 'none' }}
         />
 
+        {/* Live Badge */}
         {isStreaming && (
-          <div className="absolute top-4 left-4 flex items-center gap-2">
+          <div className="absolute top-4 left-4 flex items-center gap-2 z-30">
             <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
             </span>
-            <span className="text-xs text-white/80 bg-black/50 px-2 py-1 rounded">
+            <span className="text-xs font-bold text-white bg-emerald-600/80 backdrop-blur-sm px-2.5 py-1 rounded-full tracking-wide">
               LIVE
             </span>
           </div>
         )}
+
+        {/* Corner Decorations */}
+        <div className="absolute top-0 left-0 w-16 h-16 bg-gradient-to-br from-white/5 to-transparent pointer-events-none z-20" />
+        <div className="absolute bottom-0 right-0 w-16 h-16 bg-gradient-to-tl from-white/5 to-transparent pointer-events-none z-20" />
       </div>
     )
   }

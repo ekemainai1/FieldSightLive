@@ -11,7 +11,10 @@
     "test": "jest",
     "test:ci": "jest --runInBand",
     "test:ci:emulator": "jest --runInBand",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "load:test:api": "k6 run scripts/load-test-api.js",
+    "load:test:ws": "k6 run scripts/load-test-ws.js",
+    "load:test": "k6 run scripts/load-test-api.js && k6 run scripts/load-test-ws.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.995.0",

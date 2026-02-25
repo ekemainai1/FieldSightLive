@@ -1,5 +1,6 @@
 import {
   S3Client,
+  GetObjectCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { PutObjectCommand } from '@aws-sdk/client-s3'
@@ -8,6 +9,11 @@ interface SignedUploadResult {
   uploadUrl: string
   objectPath: string
   publicUrl: string
+  expiresAt: string
+}
+
+interface SignedReadResult {
+  url: string
   expiresAt: string
 }
 
@@ -75,10 +81,35 @@ export class MinioStorageService {
     )
 
     const expiresMs = Date.now() + expiresSeconds * 1000
+
+    const readUrl = await this.getSignedReadUrl(objectPath)
+
     return {
       uploadUrl,
       objectPath,
-      publicUrl: `${this.publicBaseUrl}/${this.bucketName}/${objectPath}`,
+      publicUrl: readUrl.url,
+      expiresAt: new Date(expiresMs).toISOString(),
+    }
+  }
+
+  public async getSignedReadUrl(objectPath: string, expiresInSeconds: number = 60 * 60): Promise<SignedReadResult> {
+    if (!this.isConfigured()) {
+      throw new Error('MinIO is not configured')
+    }
+
+    const expiresMs = Date.now() + expiresInSeconds * 1000
+
+    const url = await getSignedUrl(
+      this.client,
+      new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: objectPath,
+      }),
+      { expiresIn: expiresInSeconds },
+    )
+
+    return {
+      url,
       expiresAt: new Date(expiresMs).toISOString(),
     }
   }

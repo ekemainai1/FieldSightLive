@@ -1,10 +1,11 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { MinioStorageService } from './minio-storage.service'
 
 jest.mock('@aws-sdk/client-s3', () => ({
   S3Client: jest.fn().mockImplementation((config) => ({ config })),
   PutObjectCommand: jest.fn().mockImplementation((input) => ({ input })),
+  GetObjectCommand: jest.fn().mockImplementation((input) => ({ input })),
 }))
 
 jest.mock('@aws-sdk/s3-request-presigner', () => ({
@@ -46,12 +47,14 @@ describe('MinioStorageService', () => {
     ).rejects.toThrow('MinIO is not configured')
   })
 
-  it('should create signed upload url and sanitize filename for object path', async () => {
+  it('should create signed upload url and return signed read URL', async () => {
     process.env.MINIO_BUCKET_NAME = 'fieldsight-dev'
     process.env.MINIO_ACCESS_KEY = 'minio'
     process.env.MINIO_SECRET_KEY = 'miniopass'
 
-    mockedGetSignedUrl.mockResolvedValueOnce('https://signed.example/upload')
+    mockedGetSignedUrl
+      .mockResolvedValueOnce('https://signed.example/upload')
+      .mockResolvedValueOnce('https://signed.example/read')
     const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
     const service = new MinioStorageService()
 
@@ -62,44 +65,32 @@ describe('MinioStorageService', () => {
     )
 
     expect(service.isConfigured()).toBe(true)
-    expect(mockedS3Client).toHaveBeenCalledWith(
-      expect.objectContaining({
-        endpoint: 'http://localhost:9000',
-        forcePathStyle: true,
-      }),
-    )
     expect(mockedPutObjectCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         Bucket: 'fieldsight-dev',
         ContentType: 'image/jpeg',
       }),
     )
-    expect(mockedGetSignedUrl).toHaveBeenCalledTimes(1)
+    expect(mockedGetSignedUrl).toHaveBeenCalledTimes(2)
     expect(result.uploadUrl).toBe('https://signed.example/upload')
     expect(result.objectPath).toBe('inspections/insp-44/images/1700000000000-snap_shot_.jpg')
-    expect(result.publicUrl).toBe(
-      'http://localhost:9000/fieldsight-dev/inspections/insp-44/images/1700000000000-snap_shot_.jpg',
-    )
+    expect(result.publicUrl).toBe('https://signed.example/read')
     expect(result.expiresAt).toBe(new Date(1_700_000_600_000).toISOString())
 
     dateNowSpy.mockRestore()
   })
 
-  it('should use configured public base url for public object path', async () => {
+  it('should return signed read URL for getSignedReadUrl', async () => {
     process.env.MINIO_BUCKET_NAME = 'fieldsight-dev'
     process.env.MINIO_ACCESS_KEY = 'minio'
     process.env.MINIO_SECRET_KEY = 'miniopass'
-    process.env.MINIO_PUBLIC_BASE_URL = 'https://cdn.example/minio'
 
-    mockedGetSignedUrl.mockResolvedValueOnce('https://signed.example/upload-2')
-    const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_500)
+    mockedGetSignedUrl.mockResolvedValue('https://signed.example/read')
     const service = new MinioStorageService()
 
-    const result = await service.createSignedUploadUrl('insp-45', 'photo.png', 'image/png')
+    const result = await service.getSignedReadUrl('inspections/insp-44/images/test.jpg')
 
-    expect(result.publicUrl).toBe(
-      'https://cdn.example/minio/fieldsight-dev/inspections/insp-45/images/1700000000500-photo.png',
-    )
-    dateNowSpy.mockRestore()
+    expect(result.url).toBe('https://signed.example/read')
+    expect(result.expiresAt).toBeDefined()
   })
 })

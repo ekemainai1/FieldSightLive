@@ -5,11 +5,13 @@ import type { InspectionReport } from '../services/firestore-data.service'
 import type { OcrExtractionResult } from '../services/equipment-ocr.service'
 import type { ReportGenerationJob } from '../services/report-pipeline.service'
 import type { WorkflowActionResult } from '../services/workflow-automation.service'
+import type { AgentExecutionResult } from '../services/adk-agent.service'
 import { StorageService } from '../services/storage.service'
 import type { WorkflowActionType } from '../types'
 
 interface StorageServiceLike {
   createSignedUploadUrl: StorageService['createSignedUploadUrl']
+  getSignedReadUrl?: (objectPath: string, expiresInSeconds?: number) => Promise<{ url: string; expiresAt: string }>
 }
 
 interface ReportPdfServiceLike {
@@ -90,6 +92,8 @@ export function createDataRouter(
   reportPdfService: ReportPdfServiceLike,
   ocrService: EquipmentOcrServiceLike,
   workflowAutomationService: WorkflowAutomationServiceLike,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  adkAgentService?: any,
 ): Router {
   const router = Router()
 
@@ -170,6 +174,14 @@ export function createDataRouter(
       return
     }
 
+    if (parsed.data.status === 'completed') {
+      try {
+        await reportPipelineService.enqueueReportGeneration(req.params.inspectionId)
+      } catch {
+        // Async report generation failed, but status update succeeded
+      }
+    }
+
     res.json(updated)
   })
 
@@ -202,7 +214,36 @@ export function createDataRouter(
     }
 
     try {
-      await dataService.appendInspectionImage(req.params.inspectionId, parsed.data.imageUrl)
+      let imageUrlToStore = parsed.data.imageUrl
+
+      // Try to extract object path and generate signed read URL
+      // This handles MinIO URLs that need signed access
+      try {
+        const url = new URL(parsed.data.imageUrl)
+        const pathname = url.pathname
+        
+        // Check if this looks like a MinIO/GCS path
+        if (pathname.includes('/inspections/')) {
+          // Extract object path (remove leading slash and bucket name if present)
+          let objectPath = pathname.startsWith('/') ? pathname.slice(1) : pathname
+          
+          // Remove bucket name from path if present (e.g., fieldsightlive-dev/inspections/... -> inspections/...)
+          const bucketName = process.env.MINIO_BUCKET_NAME || process.env.GCS_BUCKET_NAME
+          if (bucketName && objectPath.startsWith(bucketName)) {
+            objectPath = objectPath.slice(bucketName.length + 1)
+          }
+          
+          // Try to generate a signed read URL (works for both MinIO and GCS)
+          if (storageService.getSignedReadUrl) {
+            const signedRead = await storageService.getSignedReadUrl(objectPath)
+            imageUrlToStore = signedRead.url
+          }
+        }
+      } catch {
+        // URL parsing failed or signed URL generation failed, use original URL
+      }
+
+      await dataService.appendInspectionImage(req.params.inspectionId, imageUrlToStore)
       res.status(204).send()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to attach image'
@@ -260,9 +301,19 @@ export function createDataRouter(
   })
 
   router.get('/inspections/:inspectionId/report', async (req, res) => {
-    const report = await dataService.getInspectionReport(req.params.inspectionId)
+    let report = await dataService.getInspectionReport(req.params.inspectionId)
+    
     if (!report) {
-      res.status(404).json({ error: 'Report not found' })
+      try {
+        await reportPipelineService.enqueueReportGeneration(req.params.inspectionId)
+        report = await dataService.getInspectionReport(req.params.inspectionId)
+      } catch {
+        // Report not ready yet
+      }
+    }
+    
+    if (!report) {
+      res.status(404).json({ error: 'Report not found. Try generating it first with POST /inspections/:inspectionId/report' })
       return
     }
     res.json(report)
@@ -387,6 +438,40 @@ export function createDataRouter(
   router.delete('/sites/:siteId/assets/:assetId', async (req, res) => {
     await dataService.deleteSiteAsset(req.params.assetId)
     res.status(204).send()
+  })
+
+  router.post('/agent/execute', async (req, res) => {
+    if (!adkAgentService) {
+      res.status(503).json({ error: 'ADK Agent service is not available' })
+      return
+    }
+
+    const { message, history } = req.body || {}
+    if (!message || typeof message !== 'string') {
+      res.status(400).json({ error: 'message is required' })
+      return
+    }
+
+    try {
+      const result = await adkAgentService.executeWithTools(message, history || [])
+      res.json(result)
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Agent execution failed',
+      })
+    }
+  })
+
+  router.get('/agent/tools', async (_req, res) => {
+    if (!adkAgentService) {
+      res.status(503).json({ error: 'ADK Agent service is not available' })
+      return
+    }
+
+    res.json({
+      functions: adkAgentService.getFunctionDeclarations(),
+      configured: adkAgentService.isConfigured(),
+    })
   })
 
   return router
