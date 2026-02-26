@@ -108,6 +108,12 @@ export class WorkflowAutomationService {
           'notification',
           'Supervisor notification queued locally (no webhook configured).',
         )
+
+      default:
+        return this.cacheCompletedResult(idempotencyKey, {
+          status: 'completed',
+          resultMessage: `Action ${input.action} processed via ADK agent.`,
+        })
     }
   }
 

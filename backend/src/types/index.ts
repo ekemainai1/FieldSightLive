@@ -49,11 +49,25 @@ export interface Inspection {
   summary?: string
 }
 
-export type WorkflowActionType = 'log_issue' | 'create_ticket' | 'notify_supervisor' | 'add_to_history'
+export type WorkflowActionType = 
+  | 'log_issue' 
+  | 'create_ticket' 
+  | 'notify_supervisor' 
+  | 'add_to_history'
+  | 'capture_location'
+  | 'run_ocr'
+  | 'enable_low_bandwidth'
+  | 'sync_offline_data'
+  | 'send_push_notification'
+  | 'get_equipment_manual'
+  | 'get_calibration_guide'
+  | 'track_time'
+  | 'order_part'
+  | 'start_share_session'
 
 export interface WorkflowEvent {
   id: string
-  action: WorkflowActionType
+  action: WorkflowActionType | string
   note?: string
   metadata?: Record<string, unknown>
   status: 'completed' | 'failed'
