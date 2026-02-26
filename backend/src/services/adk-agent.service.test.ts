@@ -69,12 +69,21 @@ describe('AdkAgentService', () => {
 
       const functions = service.getFunctionDeclarations()
 
-      expect(functions).toHaveLength(5)
+      expect(functions).toHaveLength(14)
       expect(functions.map(f => f.name)).toContain('log_issue')
       expect(functions.map(f => f.name)).toContain('create_ticket')
       expect(functions.map(f => f.name)).toContain('notify_supervisor')
       expect(functions.map(f => f.name)).toContain('add_to_history')
       expect(functions.map(f => f.name)).toContain('run_ocr')
+      expect(functions.map(f => f.name)).toContain('get_equipment_manual')
+      expect(functions.map(f => f.name)).toContain('get_calibration_guide')
+      expect(functions.map(f => f.name)).toContain('track_time')
+      expect(functions.map(f => f.name)).toContain('order_part')
+      expect(functions.map(f => f.name)).toContain('start_share_session')
+      expect(functions.map(f => f.name)).toContain('enable_low_bandwidth')
+      expect(functions.map(f => f.name)).toContain('sync_offline_data')
+      expect(functions.map(f => f.name)).toContain('send_push_notification')
+      expect(functions.map(f => f.name)).toContain('capture_location')
     })
   })
 
