@@ -1,0 +1,29 @@
+{
+  "name": "FieldSight Live",
+  "short_name": "FieldSight",
+  "description": "AI-Assisted Field Technician Companion for real-time inspection, voice guidance, and safety detection.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity", "utilities"],
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Live Assist",
+      "url": "/live",
+      "description": "Start a live inspection"
+    },
+    {
+      "name": "AI Assistant",
+      "url": "/agent",
+      "description": "Chat with AI assistant"
+    },
+    {
+      "name": "History",
+      "url": "/history",
+      "description": "View inspection history"
+    }
+  ]
+}

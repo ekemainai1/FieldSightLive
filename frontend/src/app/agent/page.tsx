@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { inspectionService, type InspectionOcrResult, type WorkflowActionEvent } from '@/services/inspection-service'
 import { useAppStore } from '@/lib/store'
+import { useTranslation } from '@/hooks/useTranslation'
 
 interface ChatMessage {
   id: string
@@ -19,6 +20,7 @@ interface ToolInfo {
 }
 
 export default function AgentPage() {
+  const t = useTranslation()
   const inspectionId = useAppStore((state) => state.selection.technicianId ? `${state.selection.technicianId}_${Date.now()}` : '')
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -98,7 +100,7 @@ export default function AgentPage() {
       <header className="flex-shrink-0">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">AI Assistant</h1>
+            <h1 className="text-2xl font-bold">{t.nav.aiAssistant}</h1>
             <p className="text-muted-foreground">
               Natural language workflow automation with Gemini AI
             </p>
@@ -140,7 +142,7 @@ export default function AgentPage() {
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              <p className="text-lg font-medium">Welcome to AI Assistant</p>
+              <p className="text-lg font-medium">Welcome to {t.nav.aiAssistant}</p>
               <p className="text-sm mt-2">
                 Ask me to perform tasks like:
               </p>

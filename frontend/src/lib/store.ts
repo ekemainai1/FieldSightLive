@@ -49,7 +49,31 @@ const generateId = () => {
   return `${Date.now()}_${idCounter}`
 }
 
+export type Theme = 'light' | 'dark' | 'system'
+
+export type Language = 'en' | 'es' | 'fr' | 'de' | 'pt' | 'zh' | 'ja' | 'ko' | 'ar' | 'hi'
+
+export type VideoQuality = 'low' | 'medium' | 'high' | 'auto'
+
 interface AppState {
+  // Theme
+  theme: Theme
+  setTheme: (theme: Theme) => void
+  
+  // Language
+  language: Language
+  setLanguage: (language: Language) => void
+  
+  // Video Quality
+  videoQuality: VideoQuality
+  setVideoQuality: (quality: VideoQuality) => void
+  
+  // Offline Sync
+  pendingOfflineCount: number
+  setPendingOfflineCount: (count: number) => void
+  isSyncing: boolean
+  setIsSyncing: (syncing: boolean) => void
+  
   // Session
   sessionId: string | null
   setSessionId: (id: string | null) => void
@@ -88,6 +112,45 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
+  // Theme
+  theme: 'system',
+  setTheme: (theme) => {
+    set({ theme })
+    if (typeof window !== 'undefined') {
+      const root = document.documentElement
+      if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        root.classList.add('dark')
+      } else {
+        root.classList.remove('dark')
+      }
+      localStorage.setItem('fieldsightlive.theme', theme)
+    }
+  },
+  
+  // Language
+  language: 'en',
+  setLanguage: (language) => {
+    set({ language })
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('fieldsightlive.language', language)
+    }
+  },
+  
+  // Video Quality
+  videoQuality: 'auto',
+  setVideoQuality: (quality) => {
+    set({ videoQuality: quality })
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('fieldsightlive.videoQuality', quality)
+    }
+  },
+  
+  // Offline Sync
+  pendingOfflineCount: 0,
+  setPendingOfflineCount: (count) => set({ pendingOfflineCount: count }),
+  isSyncing: false,
+  setIsSyncing: (syncing) => set({ isSyncing: syncing }),
+  
   // Session
   sessionId: null,
   setSessionId: (id) => set({ sessionId: id }),

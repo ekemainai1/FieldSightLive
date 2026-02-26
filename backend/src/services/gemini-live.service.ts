@@ -9,6 +9,7 @@ import type {
   SafetyFlag,
   VideoFrameMessage,
 } from '../types'
+import { LANGUAGE_SYSTEM_PROMPTS, type Language } from '../agents/languages'
 
 interface ParsedGeminiPayload {
   text: string
@@ -50,33 +51,11 @@ export interface LiveHealthStatus {
   reason?: string
 }
 
-const SYSTEM_PROMPT = `You are VisionAssist, a real-time technician support agent.
-You receive live video frames and/or field audio updates.
+export type SupportedLanguage = Language | 'en'
 
-Rules:
-- Keep responses short and actionable.
-- Prioritize safety warnings when present.
-- Ask for better angle/lighting if confidence is low.
-- Return strict JSON only (no markdown code fences).
-
-Return JSON shape:
-{
-  "text": "string",
-  "needsClarity": boolean,
-  "clarityRequest": "string | null",
-  "safetyFlags": [{
-    "type": "missing_ppe|dangerous_proximity|leak|spark|exposed_wire|slippery_surface|open_flame",
-    "severity": "low|medium|high|critical",
-    "description": "string"
-  }],
-  "detectedFaults": [{
-    "component": "string",
-    "faultType": "string",
-    "confidence": number,
-    "description": "string",
-    "recommendedActions": ["string"]
-  }]
-}`
+function getSystemPrompt(language: SupportedLanguage = 'en'): string {
+  return LANGUAGE_SYSTEM_PROMPTS[language] || LANGUAGE_SYSTEM_PROMPTS.en
+}
 
 const DIRECT_MODEL_FALLBACKS = ['gemini-2.5-flash', 'gemini-2.0-flash']
 
@@ -120,7 +99,7 @@ export class GeminiLiveService {
     } catch {
       const direct = await this.generateStructuredResponse(
         [
-          { text: SYSTEM_PROMPT },
+          { text: getSystemPrompt() },
           { text: prompt },
           {
             inlineData: {
@@ -173,7 +152,7 @@ export class GeminiLiveService {
     } catch {
       return this.generateStructuredResponse(
         [
-          { text: SYSTEM_PROMPT },
+          { text: getSystemPrompt() },
           { text: prompt },
         ],
         onChunk,
@@ -352,7 +331,7 @@ export class GeminiLiveService {
         setup: {
           model: modelPath,
           system_instruction: {
-            parts: [{ text: SYSTEM_PROMPT }],
+            parts: [{ text: getSystemPrompt() }],
           },
           generation_config: {
             response_modalities: ['TEXT'],
@@ -462,7 +441,7 @@ export class GeminiLiveService {
       setup: {
         model: modelPath,
         system_instruction: {
-          parts: [{ text: SYSTEM_PROMPT }],
+          parts: [{ text: getSystemPrompt() }],
         },
         generation_config: {
           response_modalities: ['TEXT'],

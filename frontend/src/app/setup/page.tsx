@@ -4,6 +4,7 @@ import { AuthPanel } from '@/components/AuthPanel'
 import { SetupPanel } from '@/components/SetupPanel'
 import { useFirebaseAuth } from '@/hooks/useFirebaseAuth'
 import { useAppStore } from '@/lib/store'
+import { useTranslation } from '@/hooks/useTranslation'
 
 export default function SetupPage() {
   const auth = useFirebaseAuth()
@@ -11,6 +12,7 @@ export default function SetupPage() {
   const siteId = useAppStore((state) => state.selection.siteId)
   const setTechnicianId = useAppStore((state) => state.setTechnicianId)
   const setSiteId = useAppStore((state) => state.setSiteId)
+  const t = useTranslation()
 
   const authRequired = String(process.env.NEXT_PUBLIC_AUTH_REQUIRED || 'false').toLowerCase() === 'true'
   const canAccessProtectedApi = !authRequired || Boolean(auth.user)
@@ -21,8 +23,8 @@ export default function SetupPage() {
   return (
     <div className="p-6 space-y-6">
       <header>
-        <h1 className="text-2xl font-bold">Setup</h1>
-        <p className="text-muted-foreground">Configure authentication, technician, and site context</p>
+        <h1 className="text-2xl font-bold">{t.setup.createTechnician}</h1>
+        <p className="text-muted-foreground">{t.setup.selectTechnician} & {t.setup.selectSite}</p>
       </header>
 
       <AuthPanel

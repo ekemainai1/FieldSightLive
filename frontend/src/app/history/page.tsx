@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { HistoryPanel } from '@/components/HistoryPanel'
 import { ReportPanel } from '@/components/ReportPanel'
 import { useAppStore } from '@/lib/store'
+import { useTranslation } from '@/hooks/useTranslation'
 import {
   inspectionService,
   type Inspection,
@@ -12,6 +13,7 @@ import {
 } from '@/services/inspection-service'
 
 export default function HistoryPage() {
+  const t = useTranslation()
   const technicianId = useAppStore((state) => state.selection.technicianId)
   const siteId = useAppStore((state) => state.selection.siteId)
   const [report, setReport] = useState<InspectionReport | null>(null)
@@ -61,8 +63,8 @@ export default function HistoryPage() {
   return (
     <div className="p-6 space-y-6">
       <header>
-        <h1 className="text-2xl font-bold">History</h1>
-        <p className="text-muted-foreground">Browse inspection history and reopen reports</p>
+        <h1 className="text-2xl font-bold">{t.history.title}</h1>
+        <p className="text-muted-foreground">{t.history.filterByDate} & {t.history.filterBySite}</p>
       </header>
 
       <HistoryPanel

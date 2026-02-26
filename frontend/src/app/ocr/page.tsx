@@ -2,9 +2,11 @@
 
 import { useState } from 'react'
 import { inspectionService, type InspectionOcrResult } from '@/services/inspection-service'
+import { useTranslation } from '@/hooks/useTranslation'
 import { ScanText, Camera, Upload, AlertCircle, CheckCircle2, Loader2, Image } from 'lucide-react'
 
 export default function OcrPage() {
+  const t = useTranslation()
   const [inspectionId, setInspectionId] = useState('')
   const [imageUrl, setImageUrl] = useState('')
   const [result, setResult] = useState<InspectionOcrResult | null>(null)
@@ -70,10 +72,10 @@ export default function OcrPage() {
         </div>
         <div>
           <h1 className="text-2xl lg:text-3xl font-display font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
-            Equipment OCR
+            {t.ocr.title}
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Extract text, serial numbers, and readings from equipment images
+            {t.ocr.extractText.replace('Text', 'text, serial numbers, and readings')}
           </p>
         </div>
       </header>

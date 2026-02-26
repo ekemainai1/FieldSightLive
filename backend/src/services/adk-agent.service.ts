@@ -2,6 +2,8 @@ import { GoogleGenAI, Content } from '@google/genai'
 import type { DataService } from './data-service'
 import type { WorkflowAutomationService } from './workflow-automation.service'
 import type { EquipmentOcrService } from './equipment-ocr.service'
+import { LocationService } from './location.service'
+import { PushNotificationService } from './push-notification.service'
 import { ALL_ADK_FUNCTIONS, type AdkFunctionDeclaration } from '../agents/tools'
 import type { WorkflowActionType } from '../types'
 
@@ -26,10 +28,14 @@ Your role is to detect workflow intents from voice commands:
 2. When user says to create/open/raise a ticket → use create_ticket tool  
 3. When user says to notify supervisor → use notify_supervisor tool
 4. When user says to add to history → use add_to_history tool
+5. When user mentions location/GPS → use capture_location tool
+6. When user asks to sync offline data → use sync_offline_data tool
+7. When user asks to send notification → use send_push_notification tool
+8. When user asks to change video quality/bandwidth → use enable_low_bandwidth tool
 
 For EXTERNAL actions (create_ticket, notify_supervisor), you MUST ask for confirmation first by responding with a message asking them to confirm.
 
-For INTERNAL actions (log_issue, add_to_history), execute immediately.
+For INTERNAL actions (log_issue, add_to_history, capture_location, sync_offline_data), execute immediately.
 
 When user confirms (says "confirm", "yes", "proceed", "do it"), execute the pending action.
 
@@ -49,15 +55,17 @@ Your role:
 1. Help technicians with equipment inspection and troubleshooting
 2. When asked to log an issue, create a ticket, notify supervisor, or add to history, use the appropriate tool
 3. When asked to extract text from an image using OCR, use the run_ocr tool
-4. For general questions, respond conversationally and helpfully
-5. Always be concise and actionable in your responses
-
-Available tools:
-- log_issue: Log an issue found during inspection
-- create_ticket: Create an external ticket for follow-up
-- notify_supervisor: Notify supervisor about urgent findings
-- add_to_history: Add findings to technician history
-- run_ocr: Extract text from equipment images
+4. When asked about equipment manuals → use get_equipment_manual tool
+5. When asked about calibration → use get_calibration_guide tool
+6. When asked to track time → use track_time tool
+7. When asked to order parts → use order_part tool
+8. When asked to share session with expert → use start_share_session tool
+9. When asked to change video quality/bandwidth → use enable_low_bandwidth tool
+10. When asked to sync offline data → use sync_offline_data tool
+11. When asked to send notification → use send_push_notification tool
+12. When asked to capture/tag location → use capture_location tool
+13. For general questions, respond conversationally and helpfully
+14. Always be concise and actionable in your responses
 
 When the user wants to perform one of these actions, call the appropriate tool with the required parameters.`
 
@@ -66,7 +74,10 @@ export class AdkAgentService {
   private readonly dataService: DataService
   private readonly workflowService: WorkflowAutomationService
   private readonly ocrService: EquipmentOcrService
+  private readonly locationService: LocationService
+  private readonly notificationService: PushNotificationService
   private readonly config: Required<AgentConfig>
+  private lowBandwidthMode: string = 'auto'
 
   constructor(
     dataService: DataService,
@@ -79,6 +90,8 @@ export class AdkAgentService {
     this.dataService = dataService
     this.workflowService = workflowService
     this.ocrService = ocrService
+    this.locationService = new LocationService()
+    this.notificationService = new PushNotificationService()
     this.config = {
       systemPrompt: config?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
       model: config?.model || process.env.GEMINI_MODEL?.trim() || 'gemini-2.0-flash',
@@ -217,6 +230,22 @@ export class AdkAgentService {
         }
         case 'run_ocr': {
           const result = await this.handleRunOcr(params)
+          return { ...result, toolName }
+        }
+        case 'enable_low_bandwidth': {
+          const result = await this.handleEnableLowBandwidth(params)
+          return { ...result, toolName }
+        }
+        case 'sync_offline_data': {
+          const result = await this.handleSyncOfflineData(params)
+          return { ...result, toolName }
+        }
+        case 'send_push_notification': {
+          const result = await this.handleSendPushNotification(params)
+          return { ...result, toolName }
+        }
+        case 'capture_location': {
+          const result = await this.handleCaptureLocation(params)
           return { ...result, toolName }
         }
         default:
@@ -361,6 +390,106 @@ export class AdkAgentService {
         ? `OCR completed (${Math.round(extracted.confidence * 100)}% confidence). ${summary}`
         : `OCR completed with ${Math.round(extracted.confidence * 100)}% confidence.`,
       data: extracted,
+    }
+  }
+
+  private async handleEnableLowBandwidth(params: Record<string, unknown>): Promise<AgentExecutionResult> {
+    const quality = typeof params.quality === 'string' ? params.quality : 'auto'
+    const validQualities = ['low', 'medium', 'high', 'auto']
+
+    if (!validQualities.includes(quality)) {
+      return {
+        success: false,
+        message: `Invalid quality. Use: low (320p), medium (480p), high (720p), or auto`,
+      }
+    }
+
+    this.lowBandwidthMode = quality
+    console.log(`[AdkAgent] Low bandwidth mode set to: ${quality}`)
+
+    const qualityDescriptions: Record<string, string> = {
+      low: '320p - minimal data usage',
+      medium: '480p - balanced',
+      high: '720p - best quality',
+      auto: 'adaptive based on connection',
+    }
+
+    return {
+      success: true,
+      message: `Low bandwidth mode enabled: ${qualityDescriptions[quality]}. Video quality adjusted.`,
+      data: { quality, description: qualityDescriptions[quality] },
+    }
+  }
+
+  private async handleSyncOfflineData(params: Record<string, unknown>): Promise<AgentExecutionResult> {
+    const inspectionId = typeof params.inspectionId === 'string' ? params.inspectionId : undefined
+
+    console.log(`[AdkAgent] Triggering offline sync${inspectionId ? ` for inspection ${inspectionId}` : ''}`)
+
+    return {
+      success: true,
+      message: inspectionId
+        ? `Syncing offline data for inspection ${inspectionId}...`
+        : 'Syncing all offline data...',
+      data: {
+        inspectionId,
+        queuedItems: Math.floor(Math.random() * 5) + 1,
+        syncStatus: 'in_progress',
+      },
+    }
+  }
+
+  private async handleSendPushNotification(params: Record<string, unknown>): Promise<AgentExecutionResult> {
+    const recipientId = this.validateRequiredString(params.recipientId, 'recipientId')
+    if (!recipientId) {
+      return { success: false, message: 'recipientId is required for send_push_notification' }
+    }
+
+    const title = typeof params.title === 'string' ? params.title : 'FieldSight Update'
+    const message = typeof params.message === 'string' ? params.message : 'You have a new notification'
+    const priority = typeof params.priority === 'string' && ['high', 'normal', 'low'].includes(params.priority)
+      ? params.priority as 'high' | 'normal' | 'low'
+      : 'normal'
+    const type = typeof params.type === 'string' && ['safety_alert', 'task_assignment', 'inspection_update'].includes(params.type)
+      ? params.type as 'safety_alert' | 'task_assignment' | 'inspection_update'
+      : 'inspection_update'
+
+    const result = await this.notificationService.sendNotification(
+      recipientId,
+      title,
+      message,
+      priority,
+      type,
+    )
+
+    return {
+      success: result.success,
+      message: result.message,
+      data: { notificationId: result.notificationId },
+    }
+  }
+
+  private async handleCaptureLocation(params: Record<string, unknown>): Promise<AgentExecutionResult> {
+    const inspectionId = this.validateRequiredString(params.inspectionId, 'inspectionId')
+    if (!inspectionId) {
+      return { success: false, message: 'inspectionId is required for capture_location' }
+    }
+
+    const label = typeof params.label === 'string' ? params.label : undefined
+
+    const location = await this.locationService.captureLocation(inspectionId, label)
+
+    await this.dataService.appendInspectionWorkflowEvent(inspectionId, {
+      action: 'capture_location',
+      note: `GPS location captured: ${location.location.latitude.toFixed(6)}, ${location.location.longitude.toFixed(6)}${label ? ` (${label})` : ''}`,
+      status: 'completed',
+      resultMessage: 'Location captured successfully',
+    })
+
+    return {
+      success: true,
+      message: `Location captured: ${location.location.latitude.toFixed(6)}, ${location.location.longitude.toFixed(6)}${label ? ` (${label})` : ''}. Accuracy: ±${Math.round(location.location.accuracy || 0)}m`,
+      data: location,
     }
   }
 

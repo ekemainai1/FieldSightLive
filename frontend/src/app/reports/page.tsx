@@ -3,8 +3,10 @@
 import { useState } from 'react'
 import { ReportPanel } from '@/components/ReportPanel'
 import { inspectionService, type InspectionReport } from '@/services/inspection-service'
+import { useTranslation } from '@/hooks/useTranslation'
 
 export default function ReportsPage() {
+  const t = useTranslation()
   const [inspectionId, setInspectionId] = useState('')
   const [report, setReport] = useState<InspectionReport | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -44,8 +46,8 @@ export default function ReportsPage() {
   return (
     <div className="p-6 space-y-6">
       <header>
-        <h1 className="text-2xl font-bold">Reports</h1>
-        <p className="text-muted-foreground">Preview and download generated inspection reports</p>
+        <h1 className="text-2xl font-bold">{t.reports.title}</h1>
+        <p className="text-muted-foreground">{t.reports.view} & {t.reports.download} generated inspection reports</p>
       </header>
 
       <div className="rounded border p-4 space-y-2">

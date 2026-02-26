@@ -11,6 +11,7 @@ import { useInspectionSession } from '@/hooks/useInspectionSession'
 import { getWebSocketService, WebSocketMessage } from '@/services/websocket'
 import { inspectionService } from '@/services/inspection-service'
 import { useAppStore } from '@/lib/store'
+import { useTranslation } from '@/hooks/useTranslation'
 import { 
   Camera, 
   Mic, 
@@ -32,6 +33,7 @@ import {
 } from 'lucide-react'
 
 export default function LivePage() {
+  const t = useTranslation()
   const sessionId = useAppStore((state) => state.sessionId)
   const setSessionId = useAppStore((state) => state.setSessionId)
   const setConnected = useAppStore((state) => state.setConnected)
@@ -44,7 +46,7 @@ export default function LivePage() {
   const technicianId = useAppStore((state) => state.selection.technicianId)
   const siteId = useAppStore((state) => state.selection.siteId)
 
-  const { stream, videoRef, startStream, stopStream, captureFrame, state: webRTCState } = useWebRTC()
+  const { stream, videoRef, startStream, stopStream, switchCamera, captureFrame, state: webRTCState, facingMode } = useWebRTC()
   const { startRecording, stopRecording, state: audioState } = useAudioCapture()
   const inspection = useInspectionSession()
   const wsService = getWebSocketService()
@@ -70,7 +72,7 @@ export default function LivePage() {
       switch (message.type) {
         case 'connected':
           setConnected(true)
-          addMessage({ type: 'system', text: 'Connected to FieldSight Live' })
+          addMessage({ type: 'system', text: t.status.connected })
           if (inspection.inspectionId) wsService.sendInspectionContext(inspection.inspectionId)
           break
         case 'live_transcript':
@@ -379,6 +381,8 @@ export default function LivePage() {
             onStopRecording={handleStopRecording}
             onCaptureSnapshot={handleCaptureSnapshot}
             onInterrupt={handleInterrupt}
+            onSwitchCamera={switchCamera}
+            facingMode={facingMode}
           />
 
           {/* Quick Actions */}

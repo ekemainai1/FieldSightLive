@@ -15,19 +15,23 @@ import {
   ChevronRight
 } from 'lucide-react'
 import { useState } from 'react'
+import { ThemeToggle } from './ThemeToggle'
+import { LanguageSelector } from './LanguageSelector'
+import { useTranslation } from '@/hooks/useTranslation'
 
 const NAV_ITEMS = [
-  { href: '/live', label: 'Live Assist', icon: Video, description: 'Camera & voice' },
-  { href: '/agent', label: 'AI Assistant', icon: Bot, description: 'Chat with AI' },
-  { href: '/setup', label: 'Setup', icon: Settings, description: 'Configuration' },
-  { href: '/ocr', label: 'OCR', icon: ScanText, description: 'Text extraction' },
-  { href: '/reports', label: 'Reports', icon: FileText, description: 'View & download' },
-  { href: '/history', label: 'History', icon: History, description: 'Past inspections' },
+  { href: '/live', key: 'liveAssist' as const, icon: Video },
+  { href: '/agent', key: 'aiAssistant' as const, icon: Bot },
+  { href: '/setup', key: 'setup' as const, icon: Settings },
+  { href: '/ocr', key: 'ocr' as const, icon: ScanText },
+  { href: '/reports', key: 'reports' as const, icon: FileText },
+  { href: '/history', key: 'history' as const, icon: History },
 ]
 
 export function SidebarNav() {
   const pathname = usePathname()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const t = useTranslation()
 
   return (
     <>
@@ -66,10 +70,10 @@ export function SidebarNav() {
             </div>
             <div>
               <h1 className="font-display font-bold text-lg text-slate-900 dark:text-white">
-                FieldSight
+                {t.app.title}
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                AI Field Assistant
+                {t.app.subtitle}
               </p>
             </div>
           </Link>
@@ -83,6 +87,7 @@ export function SidebarNav() {
           {NAV_ITEMS.map((item) => {
             const active = pathname === item.href
             const Icon = item.icon
+            const navLabel = t.nav[item.key] || item.key
             return (
               <Link
                 key={item.href}
@@ -99,9 +104,9 @@ export function SidebarNav() {
               >
                 <Icon className={`w-5 h-5 flex-shrink-0 ${active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'}`} />
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{item.label}</p>
+                  <p className="font-medium text-sm truncate">{navLabel}</p>
                   <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
-                    {item.description}
+                    {navLabel}
                   </p>
                 </div>
                 {active && (
@@ -113,20 +118,28 @@ export function SidebarNav() {
         </nav>
 
         {/* Footer */}
-        <div className="p-4 lg:p-5 border-t border-slate-200/60 dark:border-slate-800/60">
-          <div className="rounded-xl bg-gradient-to-br from-slate-100 to-slate-50 dark:from-slate-900 dark:to-slate-800/50 p-4">
-            <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">
-              Need help?
-            </p>
-            <p className="text-xs text-slate-500 dark:text-slate-500">
-              Check docs for guides and API references.
+        <div className="p-4 lg:p-5 border-t border-slate-200/60 dark:border-slate-800/60 space-y-3">
+          {/* Theme & Language Row */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
+              <ThemeToggle />
+              <div className="w-px h-6 bg-slate-300 dark:bg-slate-600" />
+              <LanguageSelector />
+            </div>
+          </div>
+          
+          {/* Help & Status */}
+          <div className="rounded-xl bg-gradient-to-br from-slate-100 to-slate-50 dark:from-slate-900 dark:to-slate-800/50 p-3">
+            <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
+              {t.app.needHelp}
             </p>
           </div>
-          <div className="mt-3 flex items-center justify-between text-xs text-slate-400 dark:text-slate-500">
-            <span>v1.0.0</span>
+          
+          <div className="flex items-center justify-between text-xs text-slate-400 dark:text-slate-500">
+            <span>{t.app.version}</span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              System ready
+              {t.app.systemReady}
             </span>
           </div>
         </div>

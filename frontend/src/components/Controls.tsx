@@ -1,7 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
-import { Camera, CameraOff, Mic, Square, Image, CircleStop, VolumeX } from 'lucide-react'
+import { Camera, CameraOff, Mic, Square, Image, CircleStop, VolumeX, FlipHorizontal, Wifi, WifiOff } from 'lucide-react'
+import { AudioVisualizer } from './AudioVisualizer'
+
+type VideoQuality = 'low' | 'medium' | 'high' | 'auto'
 
 interface ControlsProps {
   isStreaming: boolean
@@ -13,6 +17,10 @@ interface ControlsProps {
   onStopRecording: () => void
   onCaptureSnapshot: () => void
   onInterrupt: () => void
+  onSwitchCamera?: () => void
+  onQualityChange?: (quality: VideoQuality) => void
+  facingMode?: 'user' | 'environment'
+  currentQuality?: VideoQuality
 }
 
 export function Controls({
@@ -25,11 +33,29 @@ export function Controls({
   onStopRecording,
   onCaptureSnapshot,
   onInterrupt,
+  onSwitchCamera,
+  onQualityChange,
+  facingMode = 'environment',
+  currentQuality = 'auto',
 }: ControlsProps) {
+  const [showQualityMenu, setShowQualityMenu] = useState(false)
+
+  const qualityOptions: { value: VideoQuality; label: string; resolution: string }[] = [
+    { value: 'low', label: 'Low', resolution: '320p' },
+    { value: 'medium', label: 'Medium', resolution: '480p' },
+    { value: 'high', label: 'High', resolution: '720p' },
+    { value: 'auto', label: 'Auto', resolution: 'Adaptive' },
+  ]
+
+  const handleQualitySelect = (quality: VideoQuality) => {
+    onQualityChange?.(quality)
+    setShowQualityMenu(false)
+  }
+
   return (
     <div className="card-elevated p-4 lg:p-5 space-y-4">
       {/* Camera Control */}
-      <div className="flex justify-center">
+      <div className="flex justify-center gap-3">
         {!isStreaming ? (
           <button
             onClick={onStartCamera}
@@ -39,13 +65,25 @@ export function Controls({
             Start Camera
           </button>
         ) : (
-          <button
-            onClick={onStopCamera}
-            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium text-sm transition-all duration-200 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50"
-          >
-            <CameraOff className="w-5 h-5" />
-            Stop Camera
-          </button>
+          <>
+            <button
+              onClick={onStopCamera}
+              className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium text-sm transition-all duration-200 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50"
+            >
+              <CameraOff className="w-5 h-5" />
+              Stop Camera
+            </button>
+            {onSwitchCamera && (
+              <button
+                onClick={onSwitchCamera}
+                className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-sm transition-all duration-200 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                aria-label={`Switch to ${facingMode === 'environment' ? 'front' : 'back'} camera`}
+              >
+                <FlipHorizontal className="w-5 h-5" />
+                {facingMode === 'environment' ? 'Selfie' : 'Back'}
+              </button>
+            )}
+          </>
         )}
       </div>
 
@@ -79,15 +117,10 @@ export function Controls({
           )}
         </button>
 
-        {/* Audio Level Indicator */}
+        {/* Audio Visualizer */}
         {isRecording && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800">
-            <div className="w-20 lg:w-24 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-100 rounded-full"
-                style={{ width: `${Math.max(5, audioLevel)}%` }}
-              />
-            </div>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 min-w-[140px]">
+            <AudioVisualizer isActive={isRecording} audioLevel={audioLevel} className="flex-1" />
             <span className="text-xs font-mono text-slate-500 dark:text-slate-400 w-8">
               {Math.round(audioLevel)}%
             </span>
@@ -121,6 +154,41 @@ export function Controls({
           <CircleStop className="w-5 h-5" />
           Stop
         </button>
+
+        {/* Low Bandwidth Toggle */}
+        <div className="relative">
+          <button
+            onClick={() => setShowQualityMenu(!showQualityMenu)}
+            disabled={!isStreaming}
+            className={cn(
+              'inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-sm transition-all duration-200',
+              'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed',
+              currentQuality !== 'auto' && 'ring-2 ring-blue-500/50'
+            )}
+          >
+            {currentQuality === 'auto' ? <Wifi className="w-5 h-5" /> : <WifiOff className="w-5 h-5" />}
+            {qualityOptions.find(q => q.value === currentQuality)?.label || 'Auto'}
+          </button>
+
+          {/* Quality Dropdown */}
+          {showQualityMenu && (
+            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 py-1 min-w-[140px] z-50">
+              {qualityOptions.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => handleQualitySelect(option.value)}
+                  className={cn(
+                    'w-full px-4 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors',
+                    currentQuality === option.value && 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium'
+                  )}
+                >
+                  <span className="block">{option.label}</span>
+                  <span className="block text-xs text-slate-400 dark:text-slate-500">{option.resolution}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Keyboard Shortcuts Hint */}

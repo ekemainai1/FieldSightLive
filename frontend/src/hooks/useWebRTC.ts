@@ -6,13 +6,17 @@ export interface WebRTCState {
   error: string | null
 }
 
+export type CameraFacing = 'user' | 'environment'
+
 export interface WebRTCHooks {
   stream: MediaStream | null
   videoRef: React.RefObject<HTMLVideoElement>
-  startStream: () => Promise<void>
+  startStream: (facing?: CameraFacing) => Promise<void>
   stopStream: () => void
+  switchCamera: () => Promise<void>
   captureFrame: () => string | null
   state: WebRTCState
+  facingMode: CameraFacing
 }
 
 export function useWebRTC(): WebRTCHooks {
@@ -23,6 +27,7 @@ export function useWebRTC(): WebRTCHooks {
   })
 
   const [stream, setStream] = useState<MediaStream | null>(null)
+  const [facingMode, setFacingMode] = useState<CameraFacing>('environment')
   const streamRef = useRef<MediaStream | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -34,8 +39,10 @@ export function useWebRTC(): WebRTCHooks {
     return canvasRef.current
   }, [])
 
-  const startStream = useCallback(async () => {
+  const startStream = useCallback(async (facing?: CameraFacing) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }))
+
+    const cameraFacing = facing ?? facingMode
 
     try {
       const existingStream = streamRef.current
@@ -47,7 +54,7 @@ export function useWebRTC(): WebRTCHooks {
       try {
         mediaStream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: { ideal: 'user' },
+            facingMode: { ideal: cameraFacing },
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
@@ -62,6 +69,7 @@ export function useWebRTC(): WebRTCHooks {
 
       setStream(mediaStream)
       streamRef.current = mediaStream
+      setFacingMode(cameraFacing)
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream
@@ -86,7 +94,7 @@ export function useWebRTC(): WebRTCHooks {
         error: errorMessage,
       }))
     }
-  }, [])
+  }, [facingMode])
 
   const stopStream = useCallback(() => {
     const activeStream = streamRef.current
@@ -105,6 +113,11 @@ export function useWebRTC(): WebRTCHooks {
       isStreaming: false,
     }))
   }, [])
+
+  const switchCamera = useCallback(async () => {
+    const newFacing = facingMode === 'environment' ? 'user' : 'environment'
+    await startStream(newFacing)
+  }, [facingMode, startStream])
 
   const captureFrame = useCallback((): string | null => {
     if (!videoRef.current || !state.isStreaming) {
@@ -139,7 +152,9 @@ export function useWebRTC(): WebRTCHooks {
     videoRef,
     startStream,
     stopStream,
+    switchCamera,
     captureFrame,
     state,
+    facingMode,
   }
 }
